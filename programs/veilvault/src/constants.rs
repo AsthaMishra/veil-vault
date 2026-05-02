@@ -1,0 +1,12 @@
+pub const BPS_SCALER: u64 = 10_000;
+pub const PERCENT_SCALER: u128 = 100;
+pub const MAX_PROTOCOL_FEE_BPS: u16 = 1_000; // 10% max
+
+pub const SLOTS_PER_SECOND: u64 = 2;
+pub const SLOTS_PER_MINUTE: u64 = 60 * SLOTS_PER_SECOND;
+pub const SLOTS_PER_HOUR: u64 = 60 * SLOTS_PER_MINUTE;
+pub const SLOTS_PER_DAY: u64 = 24 * SLOTS_PER_HOUR;
+pub const SLOTS_PER_YEAR: u64 = 365 * SLOTS_PER_DAY; 
+
+pub const RATE_SCALE: u128 = 1_000_000_000_000; // 1e12 precision
+

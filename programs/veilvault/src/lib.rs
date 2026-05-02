@@ -6,6 +6,9 @@ use state::*;
 pub mod error;
 use error::*;
 
+pub mod constants;
+use constants::*;
+
 declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 
 #[program]

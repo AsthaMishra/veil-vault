@@ -1,4 +1,4 @@
-use crate::LendingError;
+use crate::{LendingError, constants::MAX_PROTOCOL_FEE_BPS};
 use anchor_lang::prelude::*;
 
 #[account]
@@ -71,7 +71,7 @@ impl LendingMarket {
     }
 
     pub fn set_protocol_fees(&mut self, protocol_fees: u16) -> Result<()> {
-        require!(protocol_fees <= 1_000, LendingError::InvalidFee); // max 10%
+        require!(protocol_fees <= MAX_PROTOCOL_FEE_BPS, LendingError::InvalidFee); // max 10%
 
         self.protocol_fee_bps = protocol_fees;
         Ok(())

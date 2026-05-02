@@ -8,4 +8,10 @@ pub enum LendingError {
     InvalidVersion,
     #[msg("Invalid protocol fee")]
     InvalidFee,
+    #[msg("Reserve does not have sufficient liquidity")]
+    InsufficientLiquidity,
+    #[msg("Borrow rate cannot be zero")]
+    BorrowRateZeroFound,
+    #[msg("Slots not elapsed yet")]
+    ZeroSlotsElapsed,
 }
