@@ -32,6 +32,17 @@ pub struct ReserveLiquidity {
 }
 
 impl ReserveLiquidity {
+    pub fn new(mint: Pubkey, supply_vault: Pubkey, fee_vault: Pubkey) -> Self {
+        Self {
+            mint,
+            supply_vault,
+            fee_vault,
+            available_amount: 0,
+            borrowed_amount_sf: 0,
+            cumulative_borrow_rate_sf: RATE_SCALE, // starts at 1.0 (no interest yet)
+        }
+    }
+
     pub fn deposit(&mut self, amount: u64) -> Result<()> {
         self.available_amount = self
             .available_amount
@@ -181,12 +192,46 @@ impl ReserveCollateral {
         Ok(())
     }
 
-    pub fn exchange_rate() {}
+    // total_liquidity comes from ReserveLiquidity::total_supply()
+    pub fn exchange_rate(&self, total_liquidity: u128) -> CollateralExchangeRate {
+        if self.mint_total_supply == 0 || total_liquidity == 0 {
+            // 1:1 initial rate — pool is empty, first depositor sets the baseline
+            CollateralExchangeRate {
+                collateral_supply: 1,
+                total_liquidity: 1,
+            }
+        } else {
+            CollateralExchangeRate {
+                collateral_supply: self.mint_total_supply as u128,
+                total_liquidity,
+            }
+        }
+    }
 }
 
 pub struct CollateralExchangeRate {
-    // pub collateral: u128,
-    // pub liquidity: Fraction,
+    collateral_supply: u128,
+    total_liquidity: u128,
 }
 
-impl CollateralExchangeRate {}
+impl CollateralExchangeRate {
+    // burn cTokens → get back underlying (withdraw)
+    // floor: user gets slightly less, protocol never overpays
+    pub fn collateral_to_liquidity(&self, collateral_amount: u64) -> Result<u64> {
+        let result = (collateral_amount as u128)
+            .checked_mul(self.total_liquidity)
+            .and_then(|n| n.checked_div(self.collateral_supply))
+            .ok_or(LendingError::MathOverflow)?;
+        Ok(result as u64)
+    }
+
+    // deposit underlying → mint cTokens
+    // floor: user gets slightly fewer cTokens
+    pub fn liquidity_to_collateral(&self, liquidity_amount: u64) -> Result<u64> {
+        let result = (liquidity_amount as u128)
+            .checked_mul(self.collateral_supply)
+            .and_then(|n| n.checked_div(self.total_liquidity))
+            .ok_or(LendingError::MathOverflow)?;
+        Ok(result as u64)
+    }
+}
