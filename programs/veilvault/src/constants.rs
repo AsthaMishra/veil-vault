@@ -10,3 +10,5 @@ pub const SLOTS_PER_YEAR: u64 = 365 * SLOTS_PER_DAY;
 
 pub const RATE_SCALE: u128 = 1_000_000_000_000; // 1e12 precision
 
+pub const MAX_LIQUIDATION_THRESHOLD_PCT: u8 = 100;
+pub const MAX_UTILIZATION_BPS: u16 = 10_000;

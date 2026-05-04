@@ -14,4 +14,12 @@ pub enum LendingError {
     BorrowRateZeroFound,
     #[msg("Slots not elapsed yet")]
     ZeroSlotsElapsed,
+    #[msg("Invalid reserve config value")]
+    InvalidConfig,
+    #[msg("Deposit limit exceeded")]
+    DepositLimitExceeded,
+    #[msg("Borrow limit exceeded")]
+    BorrowLimitExceeded,
+    #[msg("Insufficient collateral supply to burn")]
+    InsufficientCollateral,
 }
