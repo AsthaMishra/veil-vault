@@ -67,8 +67,9 @@ impl Reserve {
 
     // Deposits liquidity, mints collateral. Returns collateral amount minted.
     pub fn deposit_liquidity(&mut self, amount: u64) -> Result<u64> {
+        let total = self.liquidity.total_supply()?;
         require!(
-            !self.deposit_limit_crossed(),
+            total.saturating_add(amount as u128) <= self.config.deposit_limit as u128,
             LendingError::DepositLimitExceeded
         );
 
@@ -112,8 +113,11 @@ impl Reserve {
 
         let borrow_rate = self.current_borrow_rate()?;
         if borrow_rate > 0 {
-            self.liquidity
-                .accured_interest(borrow_rate as u64, slots_elapsed)?;
+            self.liquidity.accured_interest(
+                borrow_rate as u64,
+                slots_elapsed,
+                self.config.protocol_fee as u64,
+            )?;
         }
 
         self.last_update_slot = current_slot;
@@ -277,6 +281,8 @@ pub struct ReserveLiquidity {
     pub available_amount: u64,
     pub borrowed_amount_sf: u128,
     pub cumulative_borrow_rate_sf: u128,
+
+    pub accumulated_protocol_fees: u128,
 }
 
 impl Default for ReserveLiquidity {
@@ -288,6 +294,7 @@ impl Default for ReserveLiquidity {
             available_amount: 0,
             borrowed_amount_sf: 0,
             cumulative_borrow_rate_sf: RATE_SCALE, // 1.0 — no interest accrued yet
+            accumulated_protocol_fees: 0,
         }
     }
 }
@@ -354,7 +361,12 @@ impl ReserveLiquidity {
         Ok(())
     }
 
-    pub fn accured_interest(&mut self, borrow_rate: u64, slot_elapsed: u64) -> Result<()> {
+    pub fn accured_interest(
+        &mut self,
+        borrow_rate: u64,
+        slot_elapsed: u64,
+        protocol_fee: u64,
+    ) -> Result<()> {
         require!(slot_elapsed > 0, LendingError::ZeroSlotsElapsed);
         require!(borrow_rate > 0, LendingError::BorrowRateZeroFound);
 
@@ -376,6 +388,16 @@ impl ReserveLiquidity {
             .checked_add(debt_accured)
             .ok_or(LendingError::MathOverflow)?;
 
+        let fee = debt_accured
+            .checked_mul(protocol_fee as u128)
+            .and_then(|f| f.checked_div(BPS_SCALER as u128))
+            .ok_or(LendingError::MathOverflow)?;
+
+        self.accumulated_protocol_fees = self
+            .accumulated_protocol_fees
+            .checked_add(fee)
+            .ok_or(LendingError::MathOverflow)?;
+
         let rate_accured = (rate as u128)
             .checked_mul(self.cumulative_borrow_rate_sf)
             .and_then(|m| m.checked_div(RATE_SCALE))
@@ -392,6 +414,7 @@ impl ReserveLiquidity {
     pub fn total_supply(&self) -> Result<u128> {
         (self.available_amount as u128)
             .checked_add(self.borrowed_amount_sf)
+            .and_then(|sum| sum.checked_sub(self.accumulated_protocol_fees))
             .ok_or(LendingError::MathOverflow.into())
     }
 
@@ -650,6 +673,7 @@ mod tests {
             available_amount: 0,
             borrowed_amount_sf: 0,
             cumulative_borrow_rate_sf: RATE_SCALE,
+            accumulated_protocol_fees: 0,
         }
     }
 
@@ -735,13 +759,13 @@ mod tests {
     #[test]
     fn test_accrue_interest_fails_on_zero_slots() {
         let mut liq = base_liquidity();
-        assert!(liq.accured_interest(1000, 0).is_err());
+        assert!(liq.accured_interest(1000, 0, 500).is_err());
     }
 
     #[test]
     fn test_accrue_interest_fails_on_zero_rate() {
         let mut liq = base_liquidity();
-        assert!(liq.accured_interest(0, 100).is_err());
+        assert!(liq.accured_interest(0, 100, 500).is_err());
     }
 
     #[test]
@@ -752,7 +776,7 @@ mod tests {
 
         let debt_before = liq.borrowed_amount_sf;
         // accrue 1 full year at 10% APR
-        liq.accured_interest(1000, SLOTS_PER_YEAR).unwrap();
+        liq.accured_interest(1000, SLOTS_PER_YEAR, 500).unwrap();
 
         assert!(liq.borrowed_amount_sf > debt_before);
     }
@@ -764,7 +788,7 @@ mod tests {
         liq.borrow(500_000).unwrap();
 
         let rate_before = liq.cumulative_borrow_rate_sf;
-        liq.accured_interest(500, SLOTS_PER_YEAR).unwrap();
+        liq.accured_interest(500, SLOTS_PER_YEAR, 500).unwrap();
 
         assert!(liq.cumulative_borrow_rate_sf > rate_before);
     }

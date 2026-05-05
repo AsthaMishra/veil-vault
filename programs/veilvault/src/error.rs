@@ -22,4 +22,16 @@ pub enum LendingError {
     BorrowLimitExceeded,
     #[msg("Insufficient collateral supply to burn")]
     InsufficientCollateral,
+    #[msg("No empty deposit slot available in obligation")]
+    ObligationDepositsFull,
+    #[msg("No empty borrow slot available in obligation")]
+    ObligationBorrowsFull,
+    #[msg("Deposit reserve not found in obligation")]
+    DepositNotFound,
+    #[msg("Borrow reserve not found in obligation")]
+    BorrowNotFound,
+    #[msg("Borrow rate decreased unexpectedly")]
+    BorrowRateDecreased,
+    #[msg("Invalid amount send dby user")]
+    InvalidAmount,
 }

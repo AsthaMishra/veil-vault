@@ -9,6 +9,9 @@ use error::*;
 pub mod constants;
 use constants::*;
 
+pub mod utils;
+pub use utils::*;
+
 declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 
 #[program]
@@ -18,7 +21,6 @@ pub mod veilvault {
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         msg!("Greetings from: {:?}", ctx.program_id);
 
-       
         Ok(())
     }
 }
