@@ -1,16 +1,13 @@
 use anchor_lang::prelude::*;
 
-pub mod state;
-use state::*;
-
-pub mod error;
-use error::*;
-
 pub mod constants;
-use constants::*;
-
+pub mod error;
+pub mod instructions;
+pub mod state;
 pub mod utils;
-pub use utils::*;
+
+pub use error::*;
+use instructions::*;
 
 declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 
@@ -18,12 +15,14 @@ declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 pub mod veilvault {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        msg!("Greetings from: {:?}", ctx.program_id);
+    pub fn initialize_market(
+        ctx: Context<InitializeMarket>,
+        args: InitializeMarketArgs,
+    ) -> Result<()> {
+        instructions::initialize_market::initialize_market(ctx, args)
+    }
 
-        Ok(())
+    pub fn add_reserve(ctx: Context<AddReserve>, args: AddReserveArgs) -> Result<()> {
+        instructions::add_reserve::add_reserve(ctx, args)
     }
 }
-
-#[derive(Accounts)]
-pub struct Initialize {}

@@ -243,6 +243,8 @@ impl Obligation {
 
     pub fn is_healthy() {}
 
+    pub fn health_factor() {}
+
     pub fn find_or_add_deposit(&self, reserve: Pubkey) -> Result<usize> {
         if let Some(slot) = self
             .deposits
@@ -295,5 +297,265 @@ impl Obligation {
     }
     pub fn active_borrow(&self) -> u8 {
         self.borrows_count
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_pubkey(seed: u8) -> Pubkey {
+        Pubkey::new_from_array([seed; 32])
+    }
+
+    fn base_obligation() -> Obligation {
+        let mut o = Obligation::default();
+        o.init(InitObligationParams {
+            bump: 1,
+            owner: dummy_pubkey(1),
+            lending_market: dummy_pubkey(2),
+        });
+        o
+    }
+
+    // --- ObligationCollateral ---
+
+    #[test]
+    fn test_collateral_default_is_inactive() {
+        let c = ObligationCollateral::default();
+        assert!(!c.is_active());
+        assert_eq!(c.deposited_amount, 0);
+    }
+
+    #[test]
+    fn test_collateral_init_is_active() {
+        let mut c = ObligationCollateral::default();
+        c.init(dummy_pubkey(10));
+        assert!(c.is_active());
+        assert_eq!(c.deposited_amount, 0);
+    }
+
+    // --- ObligationLiquidity ---
+
+    #[test]
+    fn test_liquidity_default_is_inactive() {
+        let l = ObligationLiquidity::default();
+        assert!(!l.is_active());
+        assert_eq!(l.borrowed_amount_sf, 0);
+        assert_eq!(l.cumulative_borrow_rate_sf, RATE_SCALE);
+    }
+
+    #[test]
+    fn test_liquidity_init_sets_rate() {
+        let mut l = ObligationLiquidity::default();
+        l.init(dummy_pubkey(20), RATE_SCALE * 2);
+        assert!(l.is_active());
+        assert_eq!(l.cumulative_borrow_rate_sf, RATE_SCALE * 2);
+    }
+
+    // --- deposit ---
+
+    #[test]
+    fn test_deposit_opens_new_slot() {
+        let mut o = base_obligation();
+        assert!(o.deposit(dummy_pubkey(10), 500).is_ok());
+        assert_eq!(o.deposits_count, 1);
+        assert_eq!(o.deposits[0].deposited_amount, 500);
+    }
+
+    #[test]
+    fn test_deposit_adds_to_existing_slot() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(10);
+        o.deposit(reserve, 500).unwrap();
+        o.deposit(reserve, 300).unwrap();
+        assert_eq!(o.deposits_count, 1);
+        assert_eq!(o.deposits[0].deposited_amount, 800);
+    }
+
+    #[test]
+    fn test_deposit_multiple_reserves() {
+        let mut o = base_obligation();
+        o.deposit(dummy_pubkey(10), 100).unwrap();
+        o.deposit(dummy_pubkey(11), 200).unwrap();
+        assert_eq!(o.deposits_count, 2);
+    }
+
+    #[test]
+    fn test_deposit_zero_fails() {
+        let mut o = base_obligation();
+        assert!(o.deposit(dummy_pubkey(10), 0).is_err());
+    }
+
+    #[test]
+    fn test_deposit_slots_full_fails() {
+        let mut o = base_obligation();
+        for i in 0..MAX_DEPOSITS_COUNT_IN_RESERVE as u8 {
+            o.deposit(dummy_pubkey(10 + i), 100).unwrap();
+        }
+        assert!(o.deposit(dummy_pubkey(99), 100).is_err());
+    }
+
+    // --- withdraw ---
+
+    #[test]
+    fn test_withdraw_reduces_amount() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(10);
+        o.deposit(reserve, 500).unwrap();
+        o.withdraw(reserve, 200).unwrap();
+        assert_eq!(o.deposits[0].deposited_amount, 300);
+        assert_eq!(o.deposits_count, 1);
+    }
+
+    #[test]
+    fn test_withdraw_full_clears_slot() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(10);
+        o.deposit(reserve, 500).unwrap();
+        o.withdraw(reserve, 500).unwrap();
+        assert_eq!(o.deposits_count, 0);
+        assert!(!o.deposits[0].is_active());
+    }
+
+    #[test]
+    fn test_withdraw_more_than_deposited_fails() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(10);
+        o.deposit(reserve, 500).unwrap();
+        assert!(o.withdraw(reserve, 600).is_err());
+    }
+
+    #[test]
+    fn test_withdraw_unknown_reserve_fails() {
+        let mut o = base_obligation();
+        assert!(o.withdraw(dummy_pubkey(99), 100).is_err());
+    }
+
+    // --- borrow ---
+
+    #[test]
+    fn test_borrow_opens_new_slot() {
+        let mut o = base_obligation();
+        assert!(o.borrow(dummy_pubkey(20), 100, RATE_SCALE).is_ok());
+        assert_eq!(o.borrows_count, 1);
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 100 * RATE_SCALE);
+    }
+
+    #[test]
+    fn test_borrow_adds_to_existing_slot() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+        o.borrow(reserve, 50, RATE_SCALE).unwrap();
+        assert_eq!(o.borrows_count, 1);
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 150 * RATE_SCALE);
+    }
+
+    #[test]
+    fn test_borrow_zero_fails() {
+        let mut o = base_obligation();
+        assert!(o.borrow(dummy_pubkey(20), 0, RATE_SCALE).is_err());
+    }
+
+    #[test]
+    fn test_borrow_slots_full_fails() {
+        let mut o = base_obligation();
+        for i in 0..MAX_BORROW_COUNT_IN_RESERVE as u8 {
+            o.borrow(dummy_pubkey(20 + i), 10, RATE_SCALE).unwrap();
+        }
+        assert!(o.borrow(dummy_pubkey(99), 10, RATE_SCALE).is_err());
+    }
+
+    // --- repay ---
+
+    #[test]
+    fn test_repay_reduces_debt() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+        o.repay(reserve, 40).unwrap();
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 60 * RATE_SCALE);
+        assert_eq!(o.borrows_count, 1);
+    }
+
+    #[test]
+    fn test_repay_full_clears_slot() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+        o.repay(reserve, 100).unwrap();
+        assert_eq!(o.borrows_count, 0);
+        assert!(!o.borrows[0].is_active());
+    }
+
+    #[test]
+    fn test_repay_more_than_owed_fails() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+        assert!(o.repay(reserve, 101).is_err());
+    }
+
+    #[test]
+    fn test_repay_unknown_reserve_fails() {
+        let mut o = base_obligation();
+        assert!(o.repay(dummy_pubkey(99), 50).is_err());
+    }
+
+    // --- accrue_interest ---
+
+    #[test]
+    fn test_accrue_interest_grows_debt() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+
+        // rate doubles
+        o.accrue_interest(0, RATE_SCALE * 2).unwrap();
+
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 200 * RATE_SCALE);
+        assert_eq!(o.borrows[0].cumulative_borrow_rate_sf, RATE_SCALE * 2);
+    }
+
+    #[test]
+    fn test_accrue_interest_no_change_when_rate_unchanged() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+        o.accrue_interest(0, RATE_SCALE).unwrap();
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 100 * RATE_SCALE);
+    }
+
+    #[test]
+    fn test_accrue_interest_rate_decrease_fails() {
+        let mut o = base_obligation();
+        o.borrow(dummy_pubkey(20), 100, RATE_SCALE * 2).unwrap();
+        assert!(o.accrue_interest(0, RATE_SCALE).is_err());
+    }
+
+    #[test]
+    fn test_accrue_interest_inactive_slot_is_noop() {
+        let mut o = base_obligation();
+        assert!(o.accrue_interest(0, RATE_SCALE * 2).is_ok());
+        assert_eq!(o.borrows[0].borrowed_amount_sf, 0);
+    }
+
+    // --- compounding ---
+
+    #[test]
+    fn test_accrue_interest_compounds_across_refreshes() {
+        let mut o = base_obligation();
+        let reserve = dummy_pubkey(20);
+        o.borrow(reserve, 100, RATE_SCALE).unwrap();
+
+        // first refresh: rate goes 1.0 → 1.05
+        o.accrue_interest(0, RATE_SCALE * 105 / 100).unwrap();
+        // second refresh: rate goes 1.05 → 1.1025
+        o.accrue_interest(0, RATE_SCALE * 11025 / 10000).unwrap();
+
+        // 100 × 1.1025 = 110.25 → 110 * RATE_SCALE (integer division)
+        let expected = 100 * RATE_SCALE * 11025 / 10000;
+        assert_eq!(o.borrows[0].borrowed_amount_sf, expected);
     }
 }

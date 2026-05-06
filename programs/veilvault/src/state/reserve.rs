@@ -1,5 +1,3 @@
-use std::ops::Mul;
-
 use anchor_lang::prelude::*;
 
 use crate::{
@@ -145,6 +143,7 @@ pub struct ReserveConfig {
     pub protocol_fee: u16,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct InitReserveConfigParams {
     pub status: u8,
     pub min_borrow_rate_bps: u16,
