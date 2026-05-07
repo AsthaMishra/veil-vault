@@ -1,13 +1,11 @@
 use litesvm::LiteSVM;
 use sha2::{Digest, Sha256};
 use solana_sdk::{
-    account::Account,
     clock::Clock,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     system_instruction,
-    sysvar::SysvarId,
     transaction::Transaction,
 };
 use spl_token::state::Mint;
