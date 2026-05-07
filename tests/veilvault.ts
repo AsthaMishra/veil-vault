@@ -1,7 +1,13 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
-import { createMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  createMint,
+  createAccount,
+  mintTo,
+  getAccount,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { assert } from "chai";
 import { Veilvault } from "../target/types/veilvault";
 
@@ -11,17 +17,32 @@ describe("veilvault", () => {
 
   const program = anchor.workspace.Veilvault as Program<Veilvault>;
   const owner = Keypair.generate();
+  const user = Keypair.generate(); // acts as depositor + borrower
 
   let lendingMarketPda: PublicKey;
   let lendingMarketBump: number;
 
+  // set by add_reserve.before — shared across all later test blocks
+  let reserveMint: PublicKey;
+  let reservePda: PublicKey;
+  let liquidityVaultPda: PublicKey;
+  let feeVaultPda: PublicKey;
+  let collateralMintPda: PublicKey;
+  let collateralSupplyVaultPda: PublicKey;
+
+  // set by init_obligation / deposit befores
+  let obligationPda: PublicKey;
+  let userTokenAccount: PublicKey;
+  let userCollateralAccount: PublicKey;
+
   before(async () => {
-    // fund the owner wallet
-    const sig = await provider.connection.requestAirdrop(
-      owner.publicKey,
-      10 * anchor.web3.LAMPORTS_PER_SOL
-    );
-    await provider.connection.confirmTransaction(sig);
+    for (const kp of [owner, user]) {
+      const sig = await provider.connection.requestAirdrop(
+        kp.publicKey,
+        10 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await provider.connection.confirmTransaction(sig);
+    }
 
     [lendingMarketPda, lendingMarketBump] = PublicKey.findProgramAddressSync(
       [Buffer.from("lending_market"), owner.publicKey.toBuffer()],
@@ -41,7 +62,7 @@ describe("veilvault", () => {
           quoteCurrency: Array.from(quoteCurrency),
           protocolFeeBps: 50,
         })
-        .accounts({
+        .accountsStrict({
           owner: owner.publicKey,
           lendingMarket: lendingMarketPda,
           systemProgram: SystemProgram.programId,
@@ -64,7 +85,7 @@ describe("veilvault", () => {
             quoteCurrency: Array(32).fill(0),
             protocolFeeBps: 50,
           })
-          .accounts({
+          .accountsStrict({
             owner: owner.publicKey,
             lendingMarket: lendingMarketPda,
             systemProgram: SystemProgram.programId,
@@ -94,9 +115,9 @@ describe("veilvault", () => {
         await program.methods
           .initializeMarket({
             quoteCurrency: Array(32).fill(0),
-            protocolFeeBps: 9999, // above MAX_PROTOCOL_FEE_BPS (1000)
+            protocolFeeBps: 9999,
           })
-          .accounts({
+          .accountsStrict({
             owner: other.publicKey,
             lendingMarket: otherMarket,
             systemProgram: SystemProgram.programId,
@@ -113,47 +134,31 @@ describe("veilvault", () => {
   // ─── add_reserve ─────────────────────────────────────────────────────
 
   describe("add_reserve", () => {
-    let reserveMint: PublicKey;
-    let reservePda: PublicKey;
-    let liquidityVaultPda: PublicKey;
-    let feeVaultPda: PublicKey;
-    let collateralMintPda: PublicKey;
-    let collateralSupplyVaultPda: PublicKey;
-
     before(async () => {
-      // create a fresh SPL mint to use as the reserve token
       reserveMint = await createMint(
         provider.connection,
         owner,
         owner.publicKey,
         null,
-        6 // 6 decimals like USDC
+        6
       );
 
       [reservePda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("reserve"),
-          lendingMarketPda.toBuffer(),
-          reserveMint.toBuffer(),
-        ],
+        [Buffer.from("reserve"), lendingMarketPda.toBuffer(), reserveMint.toBuffer()],
         program.programId
       );
-
       [liquidityVaultPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("liquidity_vault"), reservePda.toBuffer()],
         program.programId
       );
-
       [feeVaultPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("fee_vault"), reservePda.toBuffer()],
         program.programId
       );
-
       [collateralMintPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("collateral_mint"), reservePda.toBuffer()],
         program.programId
       );
-
       [collateralSupplyVaultPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("collateral_supply"), reservePda.toBuffer()],
         program.programId
@@ -177,11 +182,11 @@ describe("veilvault", () => {
             protocolFee: 50,
           },
         })
-        .accounts({
+        .accountsStrict({
           owner: owner.publicKey,
           lendingMarket: lendingMarketPda,
           reserve: reservePda,
-          reserveMint: reserveMint,
+          reserveMint,
           liquidityVault: liquidityVaultPda,
           feeVault: feeVaultPda,
           collateralMint: collateralMintPda,
@@ -218,11 +223,7 @@ describe("veilvault", () => {
       );
 
       const [fakeReservePda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("reserve"),
-          lendingMarketPda.toBuffer(),
-          fakeMint.toBuffer(),
-        ],
+        [Buffer.from("reserve"), lendingMarketPda.toBuffer(), fakeMint.toBuffer()],
         program.programId
       );
 
@@ -243,8 +244,8 @@ describe("veilvault", () => {
               protocolFee: 50,
             },
           })
-          .accounts({
-            owner: attacker.publicKey, // wrong owner
+          .accountsStrict({
+            owner: attacker.publicKey,
             lendingMarket: lendingMarketPda,
             reserve: fakeReservePda,
             reserveMint: fakeMint,
@@ -254,13 +255,326 @@ describe("veilvault", () => {
             collateralSupplyVault: collateralSupplyVaultPda,
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
-            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           })
           .signers([attacker])
           .rpc();
         assert.fail("should have thrown");
       } catch (e) {
         assert.ok(e, "non-owner correctly rejected");
+      }
+    });
+  });
+
+  // ─── init_obligation ─────────────────────────────────────────────────
+
+  describe("init_obligation", () => {
+    before(async () => {
+      [obligationPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("obligation"),
+          lendingMarketPda.toBuffer(),
+          user.publicKey.toBuffer(),
+        ],
+        program.programId
+      );
+    });
+
+    it("creates obligation with zero deposits and borrows", async () => {
+      await program.methods
+        .initObligation()
+        .accountsStrict({
+          owner: user.publicKey,
+          lendingMarket: lendingMarketPda,
+          obligation: obligationPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([user])
+        .rpc();
+
+      const obligation = await program.account.obligation.fetch(obligationPda);
+
+      assert.ok(obligation.owner.equals(user.publicKey));
+      assert.ok(obligation.lendingMarket.equals(lendingMarketPda));
+      assert.equal(obligation.depositsCount, 0);
+      assert.equal(obligation.borrowsCount, 0);
+    });
+
+    it("rejects duplicate init_obligation for same user + market", async () => {
+      try {
+        await program.methods
+          .initObligation()
+          .accountsStrict({
+            owner: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            obligation: obligationPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "duplicate obligation init correctly rejected");
+      }
+    });
+  });
+
+  // ─── deposit ─────────────────────────────────────────────────────────
+
+  describe("deposit", () => {
+    const MINT_AMOUNT = 10_000_000; // 10 tokens
+    const DEPOSIT_AMOUNT = 1_000_000; // 1 token
+
+    before(async () => {
+      // underlying token account — funded with 10 tokens
+      userTokenAccount = await createAccount(
+        provider.connection,
+        user,
+        reserveMint,
+        user.publicKey
+      );
+      await mintTo(
+        provider.connection,
+        owner,
+        reserveMint,
+        userTokenAccount,
+        owner,
+        MINT_AMOUNT
+      );
+
+      // cToken account — empty, collateral_mint is already on-chain from add_reserve
+      userCollateralAccount = await createAccount(
+        provider.connection,
+        user,
+        collateralMintPda,
+        user.publicKey
+      );
+    });
+
+    it("moves tokens into vault and mints cTokens 1:1 on first deposit", async () => {
+      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
+
+      await program.methods
+        .deposit(new anchor.BN(DEPOSIT_AMOUNT))
+        .accountsStrict({
+          depositor: user.publicKey,
+          lendingMarket: lendingMarketPda,
+          reserve: reservePda,
+          reserveMint,
+          liquidityVault: liquidityVaultPda,
+          collateralMint: collateralMintPda,
+          userTokenAccount,
+          userCollateralAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user])
+        .rpc();
+
+      const vaultAfter = await getAccount(provider.connection, liquidityVaultPda);
+      const userCollateral = await getAccount(provider.connection, userCollateralAccount);
+      const userToken = await getAccount(provider.connection, userTokenAccount);
+
+      // vault received the deposit
+      assert.equal(Number(vaultAfter.amount - vaultBefore.amount), DEPOSIT_AMOUNT);
+      // first deposit into empty pool → exchange rate is 1:1, so cTokens == tokens
+      assert.equal(Number(userCollateral.amount), DEPOSIT_AMOUNT);
+      // user was debited
+      assert.equal(Number(userToken.amount), MINT_AMOUNT - DEPOSIT_AMOUNT);
+
+      const reserve = await program.account.reserve.fetch(reservePda);
+      assert.equal(Number(reserve.liquidity.availableAmount), DEPOSIT_AMOUNT);
+      assert.equal(Number(reserve.collateral.mintTotalSupply), DEPOSIT_AMOUNT);
+    });
+
+    it("rejects zero deposit", async () => {
+      try {
+        await program.methods
+          .deposit(new anchor.BN(0))
+          .accountsStrict({
+            depositor: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            collateralMint: collateralMintPda,
+            userTokenAccount,
+            userCollateralAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "zero deposit correctly rejected");
+      }
+    });
+  });
+
+  // ─── borrow ──────────────────────────────────────────────────────────
+
+  describe("borrow", () => {
+    const BORROW_AMOUNT = 500_000; // 0.5 tokens
+
+    it("transfers tokens from vault to borrower and records debt in obligation", async () => {
+      const userBefore = await getAccount(provider.connection, userTokenAccount);
+      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
+
+      await program.methods
+        .borrow(new anchor.BN(BORROW_AMOUNT))
+        .accountsStrict({
+          borrower: user.publicKey,
+          lendingMarket: lendingMarketPda,
+          obligation: obligationPda,
+          reserve: reservePda,
+          reserveMint,
+          liquidityVault: liquidityVaultPda,
+          userTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user])
+        .rpc();
+
+      const userAfter = await getAccount(provider.connection, userTokenAccount);
+      const vaultAfter = await getAccount(provider.connection, liquidityVaultPda);
+      const obligation = await program.account.obligation.fetch(obligationPda);
+      const reserve = await program.account.reserve.fetch(reservePda);
+
+      // user received borrowed tokens
+      assert.equal(Number(userAfter.amount - userBefore.amount), BORROW_AMOUNT);
+      // vault was debited
+      assert.equal(Number(vaultBefore.amount - vaultAfter.amount), BORROW_AMOUNT);
+      // obligation opened one borrow slot
+      assert.equal(obligation.borrowsCount, 1);
+      assert.ok(obligation.borrows[0].borrowReserve.equals(reservePda));
+      // reserve tracks outstanding debt
+      assert.equal(Number(reserve.liquidity.borrowedAmountSf), BORROW_AMOUNT);
+    });
+
+    it("rejects zero borrow", async () => {
+      try {
+        await program.methods
+          .borrow(new anchor.BN(0))
+          .accountsStrict({
+            borrower: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            obligation: obligationPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "zero borrow correctly rejected");
+      }
+    });
+
+    it("rejects borrow exceeding available liquidity", async () => {
+      try {
+        await program.methods
+          .borrow(new anchor.BN(999_000_000)) // way more than the 0.5 left in vault
+          .accountsStrict({
+            borrower: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            obligation: obligationPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "over-borrow correctly rejected");
+      }
+    });
+  });
+
+  // ─── repay ───────────────────────────────────────────────────────────
+
+  describe("repay", () => {
+    const REPAY_AMOUNT = 500_000; // repay the full borrowed amount
+
+    it("moves tokens back to vault and clears obligation borrow slot", async () => {
+      const userBefore = await getAccount(provider.connection, userTokenAccount);
+      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
+
+      await program.methods
+        .repay(new anchor.BN(REPAY_AMOUNT))
+        .accountsStrict({
+          borrower: user.publicKey,
+          lendingMarket: lendingMarketPda,
+          obligation: obligationPda,
+          reserve: reservePda,
+          reserveMint,
+          liquidityVault: liquidityVaultPda,
+          userTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user])
+        .rpc();
+
+      const userAfter = await getAccount(provider.connection, userTokenAccount);
+      const vaultAfter = await getAccount(provider.connection, liquidityVaultPda);
+      const obligation = await program.account.obligation.fetch(obligationPda);
+      const reserve = await program.account.reserve.fetch(reservePda);
+
+      // user was debited
+      assert.equal(Number(userBefore.amount - userAfter.amount), REPAY_AMOUNT);
+      // vault received repayment
+      assert.equal(Number(vaultAfter.amount - vaultBefore.amount), REPAY_AMOUNT);
+      // obligation borrow slot was cleared (full repay, no interest at test timescale)
+      assert.equal(obligation.borrowsCount, 0);
+      // reserve debt back to zero
+      assert.equal(Number(reserve.liquidity.borrowedAmountSf), 0);
+    });
+
+    it("rejects zero repay", async () => {
+      try {
+        await program.methods
+          .repay(new anchor.BN(0))
+          .accountsStrict({
+            borrower: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            obligation: obligationPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "zero repay correctly rejected");
+      }
+    });
+
+    it("rejects repaying more than owed", async () => {
+      // obligation now has 0 borrows, so find_borrow will fail
+      try {
+        await program.methods
+          .repay(new anchor.BN(1))
+          .accountsStrict({
+            borrower: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            obligation: obligationPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "repay with no outstanding borrow correctly rejected");
       }
     });
   });

@@ -23,12 +23,13 @@ Standard lending protocols (Kamino, Marginfi) store all positions in plaintext o
 ### PDAs
 
 ```
-LendingMarket:   ["lending_market", owner]
-Reserve:         ["reserve", lending_market, mint]
-Liquidity vault: ["liquidity_vault", reserve]
-Fee vault:       ["fee_vault", reserve]
-Collateral mint: ["collateral_mint", reserve]
-Obligation:      ["obligation", lending_market, user]
+LendingMarket:      ["lending_market", owner]
+Reserve:            ["reserve", lending_market, mint]
+Liquidity vault:    ["liquidity_vault", reserve]
+Fee vault:          ["fee_vault", reserve]
+Collateral mint:    ["collateral_mint", reserve]
+Collateral supply:  ["collateral_supply", reserve]
+Obligation:         ["obligation", lending_market, user]
 ```
 
 ### Collateral Tokens (cTokens)
@@ -40,6 +41,27 @@ exchange_rate = total_liquidity_supply / ctoken_supply
 ```
 
 `total_liquidity_supply = available + borrowed − accumulated_protocol_fees`
+
+Depositing into an empty pool always mints 1:1. After interest accrues, each cToken redeems for more than 1 underlying token.
+
+---
+
+## Instruction Flow
+
+```
+initialize_market   — create LendingMarket PDA (admin only)
+add_reserve         — register a new asset with config + mint all vault/cToken PDAs
+init_obligation     — create a per-user Obligation PDA (one per market)
+deposit             — transfer underlying → liquidity_vault, mint cTokens to user
+borrow              — transfer underlying from vault → user, record debt in Obligation
+repay               — transfer underlying from user → vault, reduce Obligation debt
+withdraw            (planned) — burn cTokens, redeem underlying
+refresh_reserve     (planned) — accrue interest + update oracle price
+refresh_obligation  (planned) — recompute borrow values via cumulative rate ratio
+liquidate           (planned) — seize collateral from unhealthy positions
+```
+
+Interest is accrued inline on every `deposit`, `borrow`, and `repay` call — no separate refresh required for basic flows.
 
 ---
 
@@ -69,7 +91,7 @@ HF = Σ(collateral_value × liquidation_threshold) / Σ(borrow_value)
 - `HF ≥ 1.0` — healthy
 - `HF < 1.0` — liquidatable
 
-Oracle prices come from Pyth with staleness checks (slot-based and timestamp-based).
+Oracle prices come from Pyth with staleness checks (slot-based and timestamp-based). Health factor enforcement is wired into `borrow` once oracle integration is complete (Day 3).
 
 ---
 
@@ -77,7 +99,7 @@ Oracle prices come from Pyth with staleness checks (slot-based and timestamp-bas
 
 Arcium MPC integration encrypts:
 - Deposited collateral amounts per user
-- Borrowed amounts per user  
+- Borrowed amounts per user
 - Health factor computation inputs
 
 Liquidation checks run over encrypted data via Arcium's MXE — the liquidator learns only whether a position is liquidatable, not the exact amounts.
@@ -89,11 +111,11 @@ Liquidation checks run over encrypted data via Arcium's MXE — the liquidator l
 | Layer | Choice |
 |---|---|
 | Program | Rust — Anchor 0.32.1 |
-| Token standard | SPL Token (Token-2022 path open for confidential transfers) |
-| Oracle | Pyth Network |
-| Privacy | Arcium Arcis + MXE |
-| Tests | Rust unit tests + TypeScript (Anchor test framework) |
-| Frontend | Next.js 15 + Tailwind + Solana wallet adapter |
+| Token standard | SPL Token / Token-2022 (via `token_interface`) |
+| Oracle | Pyth Network (planned Day 3) |
+| Privacy | Arcium Arcis + MXE (planned Day 5) |
+| Tests | Rust unit tests + TypeScript integration (Anchor) |
+| Frontend | Next.js 15 + Tailwind + Solana wallet adapter (planned Day 8) |
 
 ---
 
@@ -101,25 +123,26 @@ Liquidation checks run over encrypted data via Arcium's MXE — the liquidator l
 
 ```
 programs/veilvault/src/
-├── lib.rs                  — program entry, instruction dispatch
-├── error.rs                — LendingError variants
-├── constants.rs            — RATE_SCALE, fee/slot/count limits
+├── lib.rs                    — program entry, instruction dispatch
+├── error.rs                  — LendingError variants
+├── constants.rs              — RATE_SCALE, fee/slot/count limits
 ├── utils/
-│   └── last_update.rs      — slot + timestamp staleness checks
+│   └── last_update.rs        — slot + timestamp staleness checks
 ├── state/
-│   ├── lending_market.rs   — LendingMarket account
-│   ├── reserve.rs          — Reserve, ReserveConfig, ReserveLiquidity, ReserveCollateral
-│   └── obligation.rs       — Obligation, ObligationCollateral, ObligationLiquidity
+│   ├── lending_market.rs     — LendingMarket account
+│   ├── reserve.rs            — Reserve, ReserveConfig, ReserveLiquidity, ReserveCollateral
+│   └── obligation.rs         — Obligation, ObligationCollateral, ObligationLiquidity
 └── instructions/
-    ├── initialize_market.rs
-    ├── add_reserve.rs
-    ├── deposit.rs          (planned)
-    ├── borrow.rs           (planned)
-    ├── repay.rs            (planned)
-    ├── withdraw.rs         (planned)
-    ├── refresh_reserve.rs  (planned)
-    ├── refresh_obligation.rs (planned)
-    └── liquidate.rs        (planned)
+    ├── initialize_market.rs  — ✓ done
+    ├── add_reserve.rs        — ✓ done
+    ├── init_obligation.rs    — ✓ done
+    ├── deposit.rs            — ✓ done
+    ├── borrow.rs             — ✓ done
+    ├── repay.rs              — ✓ done
+    ├── withdraw.rs           — planned
+    ├── refresh_reserve.rs    — planned
+    ├── refresh_obligation.rs — planned
+    └── liquidate.rs          — planned
 ```
 
 ---
@@ -131,26 +154,28 @@ programs/veilvault/src/
 ```bash
 cd veilvault
 
-# build the program
+# build the BPF program
 anchor build
 
-# run all tests against localnet
+# run integration tests against localnet
 anchor test
 ```
 
-Unit tests (Rust) live inside each `state/` module and can be run independently:
+Rust unit tests live inside each `state/` module (66 tests across `reserve.rs` and `obligation.rs`) and run without a validator:
 
 ```bash
-cargo test -p veilvault
+cargo test
 ```
 
 ---
 
 ## Key Design Decisions
 
-- `zero_copy` + `#[repr(C)]` for large accounts (`Reserve`, `Obligation`) — avoids Solana stack overflow on deserialization
-- `RATE_SCALE = 1_000_000_000_000` (1e12) fixed-point precision for interest math
-- `_sf` suffix on fields that store scaled integers (e.g. `borrowed_amount_sf`)
+- `#[account(zero_copy)]` + `#[repr(C)]` for large accounts (`Reserve`, `Obligation`) — `AccountLoader` keeps them off the stack; required to stay within Solana's 4096-byte BPF frame limit
+- `Box<Account<...>>` / `Box<InterfaceAccount<...>>` for large accounts in `Accounts` structs — prevents stack overflow during `try_accounts` deserialization
+- `RATE_SCALE = 1_000_000_000_000` (1e12) fixed-point precision for interest math — obligation debt tracked in scaled units, reserve debt in raw token units
+- `_sf` suffix on scaled fields (e.g. `borrowed_amount_sf`, `cumulative_borrow_rate_sf`)
+- Sub-unit dust cleared on repay — if remaining obligation debt < `RATE_SCALE` (less than one atomic token unit) after repayment, the borrow slot is closed automatically
 - Checked arithmetic everywhere — no unchecked `+`/`-` on financial values
-- Clean state/instructions boundary — state structs contain pure logic with no Anchor or CPI calls; instructions own all account validation and CPI
+- Clean state/instructions split — state structs are pure Rust with no Anchor or CPI calls; instructions own all account validation and CPI
 - Simpler than Kamino by design — no elevation groups, withdrawal tickets, farms, or referral tiers

@@ -72,9 +72,9 @@ pub struct InitObligationParams {
     pub lending_market: Pubkey,
 }
 
-#[derive(Debug)]
-#[zero_copy]
+#[account(zero_copy)]
 #[repr(C)]
+#[derive(Debug)]
 pub struct Obligation {
     pub lending_market: Pubkey,
     pub owner: Pubkey,
@@ -200,7 +200,9 @@ impl Obligation {
             .checked_sub(amount_sf)
             .ok_or(LendingError::MathOverflow)?;
 
-        if self.borrows[slot].borrowed_amount_sf == 0 {
+        // clear if fully repaid OR only sub-unit dust remains after interest rounding
+        // (< RATE_SCALE means less than one atomic token unit — safe to forgive)
+        if self.borrows[slot].borrowed_amount_sf < RATE_SCALE {
             self.borrows[slot] = ObligationLiquidity::default();
             self.borrows_count = self.borrows_count.saturating_sub(1);
         }

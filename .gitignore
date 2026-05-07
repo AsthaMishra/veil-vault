@@ -1,7 +1,23 @@
+# Anchor / Solana
 .anchor
-.DS_Store
+test-ledger
 target
 **/*.rs.bk
+
+# Node
 node_modules
-test-ledger
 .yarn
+package-lock.json
+
+# Environment & secrets — never commit keys
+.env
+.env.*
+!.env.example
+
+# Next.js (Day 8 frontend)
+app/.next
+app/out
+app/node_modules
+
+# OS
+.DS_Store

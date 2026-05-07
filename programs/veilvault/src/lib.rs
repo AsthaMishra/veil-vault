@@ -25,4 +25,20 @@ pub mod veilvault {
     pub fn add_reserve(ctx: Context<AddReserve>, args: AddReserveArgs) -> Result<()> {
         instructions::add_reserve::add_reserve(ctx, args)
     }
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+        instructions::deposit::deposit(ctx, amount)
+    }
+
+    pub fn init_obligation(ctx: Context<InitObligation>) -> Result<()> {
+        instructions::init_obligation::init_obligation(ctx)
+    }
+
+    pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
+        instructions::borrow::borrow(ctx, amount)
+    }
+
+    pub fn repay(ctx: Context<Repay>, amount: u64) -> Result<()> {
+        instructions::repay::repay(ctx, amount)
+    }
 }
