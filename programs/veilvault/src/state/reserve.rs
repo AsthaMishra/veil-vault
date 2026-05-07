@@ -10,36 +10,44 @@ use crate::{
 
 pub const RESERVE_VERSION: u64 = 1;
 
-#[account]
-#[derive(Default)]
+// ─── Reserve ────────────────────────────────────────────────────────────────
+//
+// Field order chosen so each field starts at its natural alignment boundary
+// with no implicit compiler-inserted gaps (required for bytemuck::Pod).
+//
+// Offsets:
+//   liquidity   (align 16, 160 bytes): offset    0
+//   config      (align  8,  32 bytes): offset  160
+//   collateral  (align  8, 1096 bytes): offset  192
+//   version     (align  8,   8 bytes): offset 1288
+//   last_update_slot                  offset 1296
+//   lending_market (align 1, 32 bytes): offset 1304
+//   bump        (align  1,   1 byte):  offset 1336
+//   padding     (align  1,   7 bytes): offset 1337 → total 1344, 1344 % 16 = 0 ✓
+
+#[account(zero_copy)]
+#[repr(C)]
+#[derive(Debug)]
 pub struct Reserve {
+    pub liquidity: ReserveLiquidity,
+    pub config: ReserveConfig,
+    pub collateral: ReserveCollateral,
     pub version: u64,
     pub last_update_slot: u64,
     pub lending_market: Pubkey,
-    pub config: ReserveConfig,
-    pub liquidity: ReserveLiquidity,
-    pub collateral: ReserveCollateral,
+    pub bump: u8,
+    pub padding: [u8; 7],
 }
 
-pub struct InitReserveParams {
-    pub current_slot: u64,
-    pub lending_market: Pubkey,
-    pub liquidity: ReserveLiquidity,
-    pub collateral: ReserveCollateral,
-    pub config: ReserveConfig,
+impl Default for Reserve {
+    fn default() -> Self {
+        let mut r: Self = bytemuck::Zeroable::zeroed();
+        r.liquidity.cumulative_borrow_rate_sf = RATE_SCALE;
+        r
+    }
 }
 
 impl Reserve {
-    pub fn init(&mut self, params: InitReserveParams) {
-        *self = Self::default();
-        self.version = RESERVE_VERSION;
-        self.last_update_slot = params.current_slot;
-        self.lending_market = params.lending_market;
-        self.liquidity = params.liquidity;
-        self.collateral = params.collateral;
-        self.config = params.config;
-    }
-
     pub fn collateral_exchange_rate(&self) -> CollateralExchangeRate {
         self.collateral
             .exchange_rate(self.liquidity.total_supply().unwrap_or(0))
@@ -49,7 +57,6 @@ impl Reserve {
         self.liquidity.utilization_rate()
     }
 
-    // utilization_rate() returns 0-100 (pct), borrow_rate() expects 0-10000 (bps)
     pub fn current_borrow_rate(&self) -> Result<u16> {
         let utilization_bps = self.liquidity.utilization_rate()? * 100;
         self.config.borrow_rate(utilization_bps as u16)
@@ -63,7 +70,6 @@ impl Reserve {
         self.liquidity.borrowed_amount_sf >= self.config.borrow_limit as u128
     }
 
-    // Deposits liquidity, mints collateral. Returns collateral amount minted.
     pub fn deposit_liquidity(&mut self, amount: u64) -> Result<u64> {
         let total = self.liquidity.total_supply()?;
         require!(
@@ -80,7 +86,6 @@ impl Reserve {
         Ok(collateral_amount)
     }
 
-    // Burns collateral, withdraws liquidity. Returns liquidity amount returned to user.
     pub fn redeem_collateral(&mut self, collateral_amount: u64) -> Result<u64> {
         let exchange_rate = self.collateral_exchange_rate();
         let liquidity_amount = exchange_rate.collateral_to_liquidity(collateral_amount)?;
@@ -123,24 +128,44 @@ impl Reserve {
     }
 }
 
-#[account]
-#[derive(Default)]
-pub struct ReserveConfig {
-    pub status: u8, // 0=active, 1=frozen, 2=deprecated
+// ─── ReserveConfig ──────────────────────────────────────────────────────────
+//
+// Offsets (no gaps):
+//   deposit_limit (u64):             offset  0
+//   borrow_limit  (u64):             offset  8
+//   min_borrow_rate_bps (u16):       offset 16
+//   optimal_borrow_rate_bps (u16):   offset 18
+//   max_borrow_rate_bps (u16):       offset 20
+//   optimal_utilization_bps (u16):   offset 22
+//   liquidation_bonus_pct (u16):     offset 24
+//   protocol_fee (u16):              offset 26
+//   status (u8):                     offset 28
+//   loan_to_value_pct (u8):          offset 29
+//   liquidation_threshold_pct (u8):  offset 30
+//   padding (u8):                    offset 31 → total 32, 32 % 8 = 0 ✓
 
+#[zero_copy]
+#[repr(C)]
+#[derive(Debug)]
+pub struct ReserveConfig {
+    pub deposit_limit: u64,
+    pub borrow_limit: u64,
     pub min_borrow_rate_bps: u16,
     pub optimal_borrow_rate_bps: u16,
     pub max_borrow_rate_bps: u16,
     pub optimal_utilization_bps: u16,
-
-    pub loan_to_value_pct: u8,         // borrow upto cretain percentage
-    pub liquidation_threshold_pct: u8, // liquidatoion will strat after this percentage
-    pub liquidation_bonus_pct: u16,    // 5% discount for liquidators
-
-    pub deposit_limit: u64,
-    pub borrow_limit: u64,
-
+    pub liquidation_bonus_pct: u16,
     pub protocol_fee: u16,
+    pub status: u8,
+    pub loan_to_value_pct: u8,
+    pub liquidation_threshold_pct: u8,
+    pub padding: u8,
+}
+
+impl Default for ReserveConfig {
+    fn default() -> Self {
+        bytemuck::Zeroable::zeroed()
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -160,24 +185,22 @@ pub struct InitReserveConfigParams {
 
 impl ReserveConfig {
     pub fn init(&mut self, params: InitReserveConfigParams) -> Result<()> {
-        *self = Self::default();
-        self.status = params.status;
+        self.deposit_limit = params.deposit_limit;
+        self.borrow_limit = params.borrow_limit;
         self.min_borrow_rate_bps = params.min_borrow_rate_bps;
         self.optimal_borrow_rate_bps = params.optimal_borrow_rate_bps;
         self.max_borrow_rate_bps = params.max_borrow_rate_bps;
         self.optimal_utilization_bps = params.optimal_utilization_bps;
+        self.liquidation_bonus_pct = params.liquidation_bonus_pct;
+        self.protocol_fee = params.protocol_fee;
+        self.status = params.status;
         self.loan_to_value_pct = params.loan_to_value_pct;
         self.liquidation_threshold_pct = params.liquidation_threshold_pct;
-        self.liquidation_bonus_pct = params.liquidation_bonus_pct;
-        self.deposit_limit = params.deposit_limit;
-        self.borrow_limit = params.borrow_limit;
-        self.protocol_fee = params.protocol_fee;
+        self.padding = 0;
         self.validate()?;
         Ok(())
     }
 
-    // Replaces the current config after validating the incoming one.
-    // Called from governance/admin instructions that update reserve params.
     pub fn update(&mut self, new_config: ReserveConfig) -> Result<()> {
         new_config.validate()?;
         *self = new_config;
@@ -192,16 +215,11 @@ impl ReserveConfig {
         self.status == 1
     }
 
-    // Returns borrow rate in bps given current utilization in bps (0–10000)
-    // Implements the two-segment kinked curve:
-    //   segment 1: 0% → optimal_utilization  (gentle slope)
-    //   segment 2: optimal_utilization → 100% (steep slope)
     pub fn borrow_rate(&self, utilization_bps: u16) -> Result<u16> {
         let util = utilization_bps as u64;
         let optimal_util = self.optimal_utilization_bps as u64;
 
         let rate: u64 = if util <= optimal_util {
-            // segment 1: min_rate + utilization * (optimal_rate - min_rate) / optimal_util
             let min: u64 = self.min_borrow_rate_bps as u64;
             let optimal: u64 = self.optimal_borrow_rate_bps as u64;
             let slope_numerator: u64 = util
@@ -216,7 +234,6 @@ impl ReserveConfig {
             };
             min.checked_add(slope).ok_or(LendingError::MathOverflow)?
         } else {
-            // segment 2: optimal_rate + (util - optimal_util) * (max_rate - optimal_rate) / (10000 - optimal_util)
             let optimal = self.optimal_borrow_rate_bps as u64;
             let max: u64 = self.max_borrow_rate_bps as u64;
             let excess_util = util.saturating_sub(optimal_util);
@@ -265,45 +282,57 @@ impl ReserveConfig {
     }
 }
 
+// ─── ReserveLiquidity ────────────────────────────────────────────────────────
+//
+// u128 fields must come first (align 16). Pubkeys (align 1) follow.
+// Offsets:
+//   borrowed_amount_sf (u128):           offset   0
+//   cumulative_borrow_rate_sf (u128):    offset  16
+//   accumulated_protocol_fees (u128):    offset  32
+//   mint (Pubkey):                       offset  48
+//   supply_vault (Pubkey):               offset  80
+//   fee_vault (Pubkey):                  offset 112
+//   available_amount (u64):              offset 144
+//   padding ([u8;8]):                    offset 152 → total 160, 160 % 16 = 0 ✓
+
 pub struct NewReserveLiquidityParams {
     pub mint: Pubkey,
     pub supply_vault: Pubkey,
     pub fee_vault: Pubkey,
 }
 
-#[account]
+#[zero_copy]
+#[repr(C)]
+#[derive(Debug)]
 pub struct ReserveLiquidity {
+    pub borrowed_amount_sf: u128,
+    pub cumulative_borrow_rate_sf: u128,
+    pub accumulated_protocol_fees: u128,
     pub mint: Pubkey,
     pub supply_vault: Pubkey,
     pub fee_vault: Pubkey,
-
     pub available_amount: u64,
-    pub borrowed_amount_sf: u128,
-    pub cumulative_borrow_rate_sf: u128,
-
-    pub accumulated_protocol_fees: u128,
+    pub padding: [u8; 8],
 }
 
 impl Default for ReserveLiquidity {
     fn default() -> Self {
-        Self {
-            mint: Pubkey::default(),
-            supply_vault: Pubkey::default(),
-            fee_vault: Pubkey::default(),
-            available_amount: 0,
-            borrowed_amount_sf: 0,
-            cumulative_borrow_rate_sf: RATE_SCALE, // 1.0 — no interest accrued yet
-            accumulated_protocol_fees: 0,
-        }
+        let mut l: Self = bytemuck::Zeroable::zeroed();
+        l.cumulative_borrow_rate_sf = RATE_SCALE;
+        l
     }
 }
 
 impl ReserveLiquidity {
     pub fn init(&mut self, params: NewReserveLiquidityParams) {
-        *self = Self::default();
+        self.borrowed_amount_sf = 0;
+        self.cumulative_borrow_rate_sf = RATE_SCALE;
+        self.accumulated_protocol_fees = 0;
         self.mint = params.mint;
         self.supply_vault = params.supply_vault;
         self.fee_vault = params.fee_vault;
+        self.available_amount = 0;
+        self.padding = [0; 8];
     }
 
     pub fn deposit(&mut self, amount: u64) -> Result<()> {
@@ -369,7 +398,6 @@ impl ReserveLiquidity {
         require!(slot_elapsed > 0, LendingError::ZeroSlotsElapsed);
         require!(borrow_rate > 0, LendingError::BorrowRateZeroFound);
 
-        // multiply by RATE_SCALE before dividing to preserve precision for small slot counts
         let rate = (borrow_rate as u128)
             .checked_mul(slot_elapsed as u128)
             .and_then(|m| m.checked_mul(RATE_SCALE))
@@ -429,12 +457,23 @@ impl ReserveLiquidity {
     }
 }
 
+// ─── ReserveCollateral ───────────────────────────────────────────────────────
+//
+// Current field order has no implicit gaps:
+//   mint_pda (Pubkey, align 1):        offset   0
+//   mint_total_supply (u64, align 8):  offset  32  (32 % 8 = 0 ✓)
+//   supply_vault_pda (Pubkey, align 1): offset  40
+//   padding1 ([u64;64], align 8):      offset  72  (72 % 8 = 0 ✓)
+//   padding2 ([u64;64], align 8):      offset 584  (584 % 8 = 0 ✓)
+//   Total: 1096, 1096 % 8 = 0 ✓
+
 pub struct NewReserveCollateralParams {
     pub mint_pda: Pubkey,
     pub supply_vault_pda: Pubkey,
 }
 
-#[account]
+#[zero_copy]
+#[repr(C)]
 #[derive(Debug)]
 pub struct ReserveCollateral {
     pub mint_pda: Pubkey,
@@ -446,22 +485,18 @@ pub struct ReserveCollateral {
 
 impl Default for ReserveCollateral {
     fn default() -> Self {
-        Self {
-            mint_pda: Pubkey::default(),
-            mint_total_supply: 0,
-            supply_vault_pda: Pubkey::default(),
-            padding1: [0; 64],
-            padding2: [0; 64],
-        }
+        bytemuck::Zeroable::zeroed()
     }
 }
 
 impl ReserveCollateral {
     pub fn init(&mut self, params: NewReserveCollateralParams) {
-        *self = Self::default();
         self.mint_pda = params.mint_pda;
+        self.mint_total_supply = 0;
         self.supply_vault_pda = params.supply_vault_pda;
+        // padding arrays stay zero (account is zero-initialised by Solana)
     }
+
     pub fn mint(&mut self, collateral_amount: u64) -> Result<()> {
         self.mint_total_supply = self
             .mint_total_supply
@@ -482,10 +517,8 @@ impl ReserveCollateral {
         Ok(())
     }
 
-    // total_liquidity comes from ReserveLiquidity::total_supply()
     pub fn exchange_rate(&self, total_liquidity: u128) -> CollateralExchangeRate {
         if self.mint_total_supply == 0 || total_liquidity == 0 {
-            // 1:1 initial rate — pool is empty, first depositor sets the baseline
             CollateralExchangeRate {
                 collateral_supply: 1,
                 total_liquidity: 1,
@@ -499,14 +532,14 @@ impl ReserveCollateral {
     }
 }
 
+// ─── CollateralExchangeRate ──────────────────────────────────────────────────
+
 pub struct CollateralExchangeRate {
     collateral_supply: u128,
     total_liquidity: u128,
 }
 
 impl CollateralExchangeRate {
-    // burn cTokens → get back underlying (withdraw)
-    // floor: user gets slightly less, protocol never overpays
     pub fn collateral_to_liquidity(&self, collateral_amount: u64) -> Result<u64> {
         let result = (collateral_amount as u128)
             .checked_mul(self.total_liquidity)
@@ -515,8 +548,6 @@ impl CollateralExchangeRate {
         Ok(result as u64)
     }
 
-    // deposit underlying → mint cTokens
-    // floor: user gets slightly fewer cTokens
     pub fn liquidity_to_collateral(&self, liquidity_amount: u64) -> Result<u64> {
         let result = (liquidity_amount as u128)
             .checked_mul(self.collateral_supply)
@@ -532,17 +563,18 @@ mod tests {
 
     fn base_config() -> ReserveConfig {
         ReserveConfig {
-            status: 0,
-            min_borrow_rate_bps: 200,      // 2%
-            optimal_borrow_rate_bps: 2000, // 20%
-            max_borrow_rate_bps: 10000,    // 100%
-            optimal_utilization_bps: 8000, // 80%
-            loan_to_value_pct: 75,
-            liquidation_threshold_pct: 80,
-            liquidation_bonus_pct: 500,
             deposit_limit: 1_000_000,
             borrow_limit: 800_000,
+            min_borrow_rate_bps: 200,
+            optimal_borrow_rate_bps: 2000,
+            max_borrow_rate_bps: 10000,
+            optimal_utilization_bps: 8000,
+            liquidation_bonus_pct: 500,
             protocol_fee: 500,
+            status: 0,
+            loan_to_value_pct: 75,
+            liquidation_threshold_pct: 80,
+            padding: 0,
         }
     }
 
@@ -556,14 +588,14 @@ mod tests {
     #[test]
     fn test_validate_ltv_must_be_below_liquidation_threshold() {
         let mut config = base_config();
-        config.loan_to_value_pct = 80; // equal to threshold — must be strictly less
+        config.loan_to_value_pct = 80;
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_validate_borrow_rates_must_be_ordered() {
         let mut config = base_config();
-        config.optimal_borrow_rate_bps = 100; // below min_borrow_rate
+        config.optimal_borrow_rate_bps = 100;
         assert!(config.validate().is_err());
     }
 
@@ -578,28 +610,24 @@ mod tests {
 
     #[test]
     fn test_borrow_rate_at_zero_utilization() {
-        // at 0% util → should return min_borrow_rate exactly
         let rate = base_config().borrow_rate(0).unwrap();
         assert_eq!(rate, 200);
     }
 
     #[test]
     fn test_borrow_rate_at_optimal_utilization() {
-        // at kink (80%) → should return optimal_borrow_rate exactly
         let rate = base_config().borrow_rate(8000).unwrap();
         assert_eq!(rate, 2000);
     }
 
     #[test]
     fn test_borrow_rate_at_max_utilization() {
-        // at 100% util → should return max_borrow_rate exactly
         let rate = base_config().borrow_rate(10000).unwrap();
         assert_eq!(rate, 10000);
     }
 
     #[test]
     fn test_borrow_rate_midpoint_segment1() {
-        // at 40% util (halfway through segment 1) → halfway between min and optimal
         // rate = 200 + 4000 * (2000 - 200) / 8000 = 200 + 900 = 1100
         let rate = base_config().borrow_rate(4000).unwrap();
         assert_eq!(rate, 1100);
@@ -607,7 +635,6 @@ mod tests {
 
     #[test]
     fn test_borrow_rate_midpoint_segment2() {
-        // at 90% util (halfway through segment 2) → halfway between optimal and max
         // rate = 2000 + (9000-8000) * (10000-2000) / (10000-8000) = 2000 + 4000 = 6000
         let rate = base_config().borrow_rate(9000).unwrap();
         assert_eq!(rate, 6000);
@@ -617,7 +644,6 @@ mod tests {
 
     #[test]
     fn test_exchange_rate_one_to_one() {
-        // 100 cTokens backed by 100 liquidity → 1:1
         let rate = CollateralExchangeRate {
             collateral_supply: 100,
             total_liquidity: 100,
@@ -628,8 +654,6 @@ mod tests {
 
     #[test]
     fn test_exchange_rate_grown() {
-        // 100 cTokens backed by 108 liquidity (interest accrued)
-        // redeem 50 cTokens → should get 54 USDC back
         let rate = CollateralExchangeRate {
             collateral_supply: 100,
             total_liquidity: 108,
@@ -639,8 +663,6 @@ mod tests {
 
     #[test]
     fn test_exchange_rate_deposit_mints_fewer_ctokens() {
-        // 100 cTokens backed by 108 liquidity
-        // deposit 108 → should mint 100 cTokens (not 108)
         let rate = CollateralExchangeRate {
             collateral_supply: 100,
             total_liquidity: 108,
@@ -658,7 +680,6 @@ mod tests {
             padding2: [0; 64],
         };
         let rate = collateral.exchange_rate(0);
-        // initial 1:1 rate: 50 cTokens → 50 liquidity
         assert_eq!(rate.collateral_to_liquidity(50).unwrap(), 50);
     }
 
@@ -666,13 +687,14 @@ mod tests {
 
     fn base_liquidity() -> ReserveLiquidity {
         ReserveLiquidity {
+            borrowed_amount_sf: 0,
+            cumulative_borrow_rate_sf: RATE_SCALE,
+            accumulated_protocol_fees: 0,
             mint: Pubkey::default(),
             supply_vault: Pubkey::default(),
             fee_vault: Pubkey::default(),
             available_amount: 0,
-            borrowed_amount_sf: 0,
-            cumulative_borrow_rate_sf: RATE_SCALE,
-            accumulated_protocol_fees: 0,
+            padding: [0; 8],
         }
     }
 
@@ -729,7 +751,6 @@ mod tests {
         let mut liq = base_liquidity();
         liq.deposit(1000).unwrap();
         liq.borrow(600).unwrap();
-        // available=400, borrowed=600, total=1000
         assert_eq!(liq.total_supply().unwrap(), 1000);
     }
 
@@ -745,7 +766,6 @@ mod tests {
         let mut liq = base_liquidity();
         liq.deposit(1000).unwrap();
         liq.borrow(800).unwrap();
-        // borrowed=800, total=1000 → 80%
         assert_eq!(liq.utilization_rate().unwrap(), 80);
     }
 
@@ -774,7 +794,6 @@ mod tests {
         liq.borrow(1_000_000).unwrap();
 
         let debt_before = liq.borrowed_amount_sf;
-        // accrue 1 full year at 10% APR
         liq.accured_interest(1000, SLOTS_PER_YEAR, 500).unwrap();
 
         assert!(liq.borrowed_amount_sf > debt_before);
@@ -833,7 +852,6 @@ mod tests {
     fn test_reserve_deposit_liquidity_mints_collateral() {
         let mut reserve = base_reserve();
         let collateral_minted = reserve.deposit_liquidity(1000).unwrap();
-        // first deposit at 1:1 rate → collateral == liquidity
         assert_eq!(collateral_minted, 1000);
         assert_eq!(reserve.liquidity.available_amount, 1000);
         assert_eq!(reserve.collateral.mint_total_supply, 1000);
@@ -842,7 +860,6 @@ mod tests {
     #[test]
     fn test_reserve_deposit_fails_when_limit_crossed() {
         let mut reserve = base_reserve();
-        // deposit_limit = 1_000_000, try depositing more
         assert!(reserve.deposit_liquidity(1_000_001).is_err());
     }
 
@@ -851,7 +868,6 @@ mod tests {
         let mut reserve = base_reserve();
         reserve.deposit_liquidity(1000).unwrap();
         let liquidity_returned = reserve.redeem_collateral(500).unwrap();
-        // 1:1 rate → get back 500 liquidity
         assert_eq!(liquidity_returned, 500);
         assert_eq!(reserve.collateral.mint_total_supply, 500);
         assert_eq!(reserve.liquidity.available_amount, 500);
@@ -870,9 +886,7 @@ mod tests {
     fn test_reserve_borrow_fails_when_limit_crossed() {
         let mut reserve = base_reserve();
         reserve.deposit_liquidity(1_000_000).unwrap();
-        // borrow_limit = 800_000, borrow once to cross it
         reserve.borrow(800_000).unwrap();
-        // now limit is crossed — next borrow should fail
         assert!(reserve.borrow(1).is_err());
     }
 
@@ -901,7 +915,6 @@ mod tests {
         reserve.deposit_liquidity(1_000_000).unwrap();
         reserve.borrow(500_000).unwrap();
         let debt_before = reserve.liquidity.borrowed_amount_sf;
-        // same slot — nothing should change
         reserve.accrue_interest(100).unwrap();
         assert_eq!(reserve.liquidity.borrowed_amount_sf, debt_before);
     }

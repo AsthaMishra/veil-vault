@@ -22,7 +22,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
+anchor-spl = { version = "0.32.1", features = ["token_2022"] }
 bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 
 

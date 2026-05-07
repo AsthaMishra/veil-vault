@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{
     error::LendingError,
     state::{
-        InitReserveConfigParams, InitReserveParams, LendingMarket, NewReserveCollateralParams,
-        NewReserveLiquidityParams, Reserve, ReserveCollateral, ReserveConfig, ReserveLiquidity,
+        InitReserveConfigParams, LendingMarket, NewReserveCollateralParams,
+        NewReserveLiquidityParams, Reserve, RESERVE_VERSION,
     },
 };
 
@@ -27,9 +27,9 @@ pub struct AddReserve<'info> {
         has_one = owner,
         constraint = !lending_market.is_paused() @ LendingError::InvalidConfig,
     )]
-    pub lending_market: Account<'info, LendingMarket>,
+    pub lending_market: Box<Account<'info, LendingMarket>>,
 
-    // reserve PDA — one per (market, mint) pair
+    // reserve PDA — AccountLoader avoids deserializing the large struct onto the stack
     #[account(
         init,
         payer = owner,
@@ -37,10 +37,11 @@ pub struct AddReserve<'info> {
         seeds = [b"reserve", lending_market.key().as_ref(), reserve_mint.key().as_ref()],
         bump,
     )]
-    pub reserve: Account<'info, Reserve>,
+    pub reserve: AccountLoader<'info, Reserve>,
+
 
     // underlying token mint (e.g. USDC, SOL wrapped)
-    pub reserve_mint: Account<'info, Mint>,
+    pub reserve_mint: Box<InterfaceAccount<'info, Mint>>,
 
     // token account that holds deposited liquidity — owned by lending_market PDA
     #[account(
@@ -51,7 +52,7 @@ pub struct AddReserve<'info> {
         seeds = [b"liquidity_vault", reserve.key().as_ref()],
         bump,
     )]
-    pub liquidity_vault: Account<'info, TokenAccount>,
+    pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     // token account that accumulates protocol fees — owned by lending_market PDA
     #[account(
@@ -62,7 +63,7 @@ pub struct AddReserve<'info> {
         seeds = [b"fee_vault", reserve.key().as_ref()],
         bump,
     )]
-    pub fee_vault: Account<'info, TokenAccount>,
+    pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     // cToken mint — minted to depositors, authority = lending_market PDA
     #[account(
@@ -73,42 +74,54 @@ pub struct AddReserve<'info> {
         seeds = [b"collateral_mint", reserve.key().as_ref()],
         bump,
     )]
-    pub collateral_mint: Account<'info, Mint>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    pub token_program: Program<'info, Token>,
+    // holds users' cTokens locked as collateral — owned by lending_market PDA
+    #[account(
+        init,
+        payer = owner,
+        token::mint = collateral_mint,
+        token::authority = lending_market,
+        seeds = [b"collateral_supply", reserve.key().as_ref()],
+        bump,
+    )]
+    pub collateral_supply_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 pub fn add_reserve(ctx: Context<AddReserve>, args: AddReserveArgs) -> Result<()> {
     let clock = Clock::get()?;
 
-    // build and validate config
-    let mut config = ReserveConfig::default();
-    config.init(args.config)?;
+    // capture keys before load_init() borrows reserve
+    let reserve_mint_key = ctx.accounts.reserve_mint.key();
+    let liquidity_vault_key = ctx.accounts.liquidity_vault.key();
+    let fee_vault_key = ctx.accounts.fee_vault.key();
+    let collateral_mint_key = ctx.accounts.collateral_mint.key();
+    let collateral_supply_key = ctx.accounts.collateral_supply_vault.key();
+    let lending_market_key = ctx.accounts.lending_market.key();
 
-    // wire liquidity vault and fee vault pubkeys into reserve state
-    let mut liquidity = ReserveLiquidity::default();
-    liquidity.init(NewReserveLiquidityParams {
-        mint: ctx.accounts.reserve_mint.key(),
-        supply_vault: ctx.accounts.liquidity_vault.key(),
-        fee_vault: ctx.accounts.fee_vault.key(),
+    // zero-copy write — no stack copy of Reserve
+    let mut reserve = ctx.accounts.reserve.load_init()?;
+
+    reserve.version = RESERVE_VERSION;
+    reserve.last_update_slot = clock.slot;
+    reserve.bump = ctx.bumps.reserve;
+    reserve.lending_market = lending_market_key;
+
+    reserve.liquidity.init(NewReserveLiquidityParams {
+        mint: reserve_mint_key,
+        supply_vault: liquidity_vault_key,
+        fee_vault: fee_vault_key,
     });
 
-    // wire collateral mint pubkey into reserve state
-    let mut collateral = ReserveCollateral::default();
-    collateral.init(NewReserveCollateralParams {
-        mint_pda: ctx.accounts.collateral_mint.key(),
-        supply_vault_pda: Pubkey::default(),
+    reserve.collateral.init(NewReserveCollateralParams {
+        mint_pda: collateral_mint_key,
+        supply_vault_pda: collateral_supply_key,
     });
 
-    ctx.accounts.reserve.init(InitReserveParams {
-        current_slot: clock.slot,
-        lending_market: ctx.accounts.lending_market.key(),
-        liquidity,
-        collateral,
-        config,
-    });
+    reserve.config.init(args.config)?;
 
     Ok(())
 }

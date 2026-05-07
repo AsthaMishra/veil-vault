@@ -1,11 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
-import {
-  createMint,
-  getOrCreateAssociatedTokenAccount,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+import { createMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { assert } from "chai";
 import { Veilvault } from "../target/types/veilvault";
 
@@ -122,6 +118,7 @@ describe("veilvault", () => {
     let liquidityVaultPda: PublicKey;
     let feeVaultPda: PublicKey;
     let collateralMintPda: PublicKey;
+    let collateralSupplyVaultPda: PublicKey;
 
     before(async () => {
       // create a fresh SPL mint to use as the reserve token
@@ -156,6 +153,11 @@ describe("veilvault", () => {
         [Buffer.from("collateral_mint"), reservePda.toBuffer()],
         program.programId
       );
+
+      [collateralSupplyVaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("collateral_supply"), reservePda.toBuffer()],
+        program.programId
+      );
     });
 
     it("creates reserve with correct config", async () => {
@@ -183,9 +185,9 @@ describe("veilvault", () => {
           liquidityVault: liquidityVaultPda,
           feeVault: feeVaultPda,
           collateralMint: collateralMintPda,
+          collateralSupplyVault: collateralSupplyVaultPda,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([owner])
         .rpc();
@@ -249,6 +251,7 @@ describe("veilvault", () => {
             liquidityVault: liquidityVaultPda,
             feeVault: feeVaultPda,
             collateralMint: collateralMintPda,
+            collateralSupplyVault: collateralSupplyVaultPda,
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
             rent: anchor.web3.SYSVAR_RENT_PUBKEY,
