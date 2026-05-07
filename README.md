@@ -55,13 +55,13 @@ init_obligation     — create a per-user Obligation PDA (one per market)
 deposit             — transfer underlying → liquidity_vault, mint cTokens to user
 borrow              — transfer underlying from vault → user, record debt in Obligation
 repay               — transfer underlying from user → vault, reduce Obligation debt
-withdraw            (planned) — burn cTokens, redeem underlying
+withdraw            — burn cTokens, return underlying from liquidity_vault
 refresh_reserve     (planned) — accrue interest + update oracle price
 refresh_obligation  (planned) — recompute borrow values via cumulative rate ratio
 liquidate           (planned) — seize collateral from unhealthy positions
 ```
 
-Interest is accrued inline on every `deposit`, `borrow`, and `repay` call — no separate refresh required for basic flows.
+Interest is accrued inline on every `deposit`, `borrow`, `repay`, and `withdraw` call — no separate refresh required for basic flows.
 
 ---
 
@@ -139,7 +139,7 @@ programs/veilvault/src/
     ├── deposit.rs            — ✓ done
     ├── borrow.rs             — ✓ done
     ├── repay.rs              — ✓ done
-    ├── withdraw.rs           — planned
+    ├── withdraw.rs           — ✓ done
     ├── refresh_reserve.rs    — planned
     ├── refresh_obligation.rs — planned
     └── liquidate.rs          — planned

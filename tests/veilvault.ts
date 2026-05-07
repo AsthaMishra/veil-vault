@@ -578,4 +578,116 @@ describe("veilvault", () => {
       }
     });
   });
+
+  // ─── withdraw ────────────────────────────────────────────────────────
+  //
+  // State entering this block (from deposit + borrow + repay flow):
+  //   vault:              1_000_000 tokens
+  //   user token account: 9_000_000 tokens
+  //   user cToken account: 1_000_000 cTokens  (from the initial deposit)
+
+  describe("withdraw", () => {
+    const WITHDRAW_COLLATERAL = 500_000; // burn half the cTokens → get half the underlying back
+
+    it("burns cTokens and returns underlying tokens to depositor", async () => {
+      const userTokenBefore = await getAccount(provider.connection, userTokenAccount);
+      const userCollateralBefore = await getAccount(
+        provider.connection,
+        userCollateralAccount
+      );
+      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
+
+      await program.methods
+        .withdraw(new anchor.BN(WITHDRAW_COLLATERAL))
+        .accountsStrict({
+          depositor: user.publicKey,
+          lendingMarket: lendingMarketPda,
+          reserve: reservePda,
+          reserveMint,
+          liquidityVault: liquidityVaultPda,
+          collateralMint: collateralMintPda,
+          userCollateralAccount,
+          userTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user])
+        .rpc();
+
+      const userTokenAfter = await getAccount(provider.connection, userTokenAccount);
+      const userCollateralAfter = await getAccount(
+        provider.connection,
+        userCollateralAccount
+      );
+      const vaultAfter = await getAccount(provider.connection, liquidityVaultPda);
+      const reserve = await program.account.reserve.fetch(reservePda);
+
+      // user received underlying tokens
+      assert.equal(
+        Number(userTokenAfter.amount - userTokenBefore.amount),
+        WITHDRAW_COLLATERAL // 1:1 exchange rate (no interest accrued at test timescale)
+      );
+      // user's cTokens were burned
+      assert.equal(
+        Number(userCollateralBefore.amount - userCollateralAfter.amount),
+        WITHDRAW_COLLATERAL
+      );
+      // vault was debited
+      assert.equal(
+        Number(vaultBefore.amount - vaultAfter.amount),
+        WITHDRAW_COLLATERAL
+      );
+      // reserve state reflects burned collateral
+      assert.equal(
+        Number(reserve.collateral.mintTotalSupply),
+        1_000_000 - WITHDRAW_COLLATERAL
+      );
+    });
+
+    it("rejects zero withdraw", async () => {
+      try {
+        await program.methods
+          .withdraw(new anchor.BN(0))
+          .accountsStrict({
+            depositor: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            collateralMint: collateralMintPda,
+            userCollateralAccount,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "zero withdraw correctly rejected");
+      }
+    });
+
+    it("rejects withdraw exceeding cToken balance", async () => {
+      // user now holds 500_000 cTokens; trying to burn 1_000_000 should fail
+      try {
+        await program.methods
+          .withdraw(new anchor.BN(1_000_000))
+          .accountsStrict({
+            depositor: user.publicKey,
+            lendingMarket: lendingMarketPda,
+            reserve: reservePda,
+            reserveMint,
+            liquidityVault: liquidityVaultPda,
+            collateralMint: collateralMintPda,
+            userCollateralAccount,
+            userTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should have thrown");
+      } catch (e) {
+        assert.ok(e, "over-withdraw correctly rejected");
+      }
+    });
+  });
 });

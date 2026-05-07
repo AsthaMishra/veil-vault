@@ -41,4 +41,8 @@ pub mod veilvault {
     pub fn repay(ctx: Context<Repay>, amount: u64) -> Result<()> {
         instructions::repay::repay(ctx, amount)
     }
+
+    pub fn withdraw(ctx: Context<Withdraw>, collateral_amount: u64) -> Result<()> {
+        instructions::withdraw::withdraw(ctx, collateral_amount)
+    }
 }
