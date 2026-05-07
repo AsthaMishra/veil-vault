@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 
 use crate::{
+    constants::RATE_SCALE,
     error::LendingError,
     state::{LendingMarket, Obligation, Reserve},
 };
@@ -74,11 +75,23 @@ pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     // accrue interest on any existing debt for this reserve, then record new borrow
     {
         let mut obligation = ctx.accounts.obligation.load_mut()?;
+
+        // require a fresh refresh_obligation in the same or prior slot
+        require!(
+            !obligation.last_update.is_slot_stale(clock.slot),
+            LendingError::ObligationStale
+        );
+
         if let Ok(slot_idx) = obligation.find_borrow(reserve_key) {
             obligation.accrue_interest(slot_idx, cumulative_borrow_rate_sf)?;
         }
-        // TODO Day 3: health factor check (requires oracle prices)
+
         obligation.borrow(reserve_key, amount as u128, cumulative_borrow_rate_sf)?;
+
+        // health factor check: after adding the new debt, obligation must still be healthy
+        if let Some(hf) = obligation.health_factor() {
+            require!(hf >= RATE_SCALE, LendingError::UnhealthyObligation);
+        }
     }
 
     // CPI: transfer underlying tokens from liquidity_vault → borrower (lending_market signs)

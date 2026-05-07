@@ -6,12 +6,21 @@ use crate::{
     utils::LastUpdate,
 };
 
+// ObligationCollateral — 64 bytes, align 16
+//   deposit_reserve (Pubkey, 32):    offset  0
+//   deposited_amount (u64, 8):       offset 32
+//   _padding (u8×8):                 offset 40  ← aligns market_value_sf to 16
+//   market_value_sf (u128, 16):      offset 48
+//   total: 64, 64 % 16 = 0 ✓
 #[derive(Debug)]
 #[zero_copy]
 #[repr(C)]
 pub struct ObligationCollateral {
     pub deposit_reserve: Pubkey,
     pub deposited_amount: u64, // in cTokens
+    pub _padding: [u8; 8],
+    /// Collateral USD value × RATE_SCALE, adjusted by liquidation_threshold. Set by refresh_obligation.
+    pub market_value_sf: u128,
 }
 
 impl Default for ObligationCollateral {
@@ -19,6 +28,8 @@ impl Default for ObligationCollateral {
         Self {
             deposit_reserve: Pubkey::default(),
             deposited_amount: 0,
+            _padding: [0; 8],
+            market_value_sf: 0,
         }
     }
 }
@@ -34,6 +45,12 @@ impl ObligationCollateral {
     }
 }
 
+// ObligationLiquidity — 80 bytes, align 16
+//   borrow_reserve (Pubkey, 32):              offset  0
+//   borrowed_amount_sf (u128, 16):            offset 32
+//   cumulative_borrow_rate_sf (u128, 16):     offset 48
+//   market_value_sf (u128, 16):               offset 64
+//   total: 80, 80 % 16 = 0 ✓
 #[derive(Debug)]
 #[zero_copy]
 #[repr(C)]
@@ -42,6 +59,8 @@ pub struct ObligationLiquidity {
     pub borrowed_amount_sf: u128,
     // snapshotted from reserve at borrow time; ratio to current rate gives accrued interest
     pub cumulative_borrow_rate_sf: u128,
+    /// Borrow USD value × RATE_SCALE. Set by refresh_obligation.
+    pub market_value_sf: u128,
 }
 
 impl Default for ObligationLiquidity {
@@ -50,6 +69,7 @@ impl Default for ObligationLiquidity {
             borrow_reserve: Pubkey::default(),
             borrowed_amount_sf: 0,
             cumulative_borrow_rate_sf: RATE_SCALE, // 1.0 — no interest at init
+            market_value_sf: 0,
         }
     }
 }
@@ -72,6 +92,17 @@ pub struct InitObligationParams {
     pub lending_market: Pubkey,
 }
 
+// Obligation — 1440 bytes total (unchanged from pre-oracle layout)
+//   lending_market (32): offset 0
+//   owner (32):          offset 32
+//   last_update (16):    offset 64
+//   deposits (8×64=512): offset 80   ← ObligationCollateral grew 40→64
+//   borrows (8×80=640):  offset 592  ← ObligationLiquidity grew 64→80
+//   deposits_count (1):  offset 1232
+//   borrows_count (1):   offset 1233
+//   bump (1):            offset 1234
+//   padding (13):        offset 1235
+//   padding1 (24×8=192): offset 1248 → total 1440, 1440 % 16 = 0 ✓
 #[account(zero_copy)]
 #[repr(C)]
 #[derive(Debug)]
@@ -85,7 +116,7 @@ pub struct Obligation {
     pub borrows_count: u8,
     pub bump: u8,
     pub padding: [u8; 13],
-    pub padding1: [u64; 64],
+    pub padding1: [u64; 24],
 }
 
 impl Default for Obligation {
@@ -100,7 +131,7 @@ impl Default for Obligation {
             deposits_count: 0,
             borrows_count: 0,
             padding: [0; 13],
-            padding1: [0; 64],
+            padding1: [0; 24],
         }
     }
 }
@@ -243,9 +274,35 @@ impl Obligation {
         Ok(())
     }
 
-    pub fn is_healthy() {}
+    /// Returns the health factor scaled by RATE_SCALE (HF=1.0 → RATE_SCALE).
+    /// Returns None when there are no active borrows (infinitely healthy).
+    /// Requires refresh_obligation to have been called so market_value_sf fields are current.
+    pub fn health_factor(&self) -> Option<u128> {
+        let borrow_value: u128 = self.borrows[..self.borrows_count as usize]
+            .iter()
+            .filter(|b| b.is_active())
+            .fold(0u128, |acc, b| acc.saturating_add(b.market_value_sf));
 
-    pub fn health_factor() {}
+        if borrow_value == 0 {
+            return None; // no borrows → infinitely healthy
+        }
+
+        let deposit_value: u128 = self.deposits[..self.deposits_count as usize]
+            .iter()
+            .filter(|d| d.is_active())
+            .fold(0u128, |acc, d| acc.saturating_add(d.market_value_sf));
+
+        // HF = deposit_value_sf / borrow_value_sf  (both already × RATE_SCALE)
+        deposit_value.checked_div(borrow_value)
+    }
+
+    /// Returns true if the obligation has no borrows or its health factor >= 1.0.
+    pub fn is_healthy(&self) -> bool {
+        match self.health_factor() {
+            None => true,
+            Some(hf) => hf >= RATE_SCALE,
+        }
+    }
 
     pub fn find_or_add_deposit(&self, reserve: Pubkey) -> Result<usize> {
         if let Some(slot) = self

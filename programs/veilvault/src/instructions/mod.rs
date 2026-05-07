@@ -3,6 +3,9 @@ pub mod borrow;
 pub mod deposit;
 pub mod init_obligation;
 pub mod initialize_market;
+pub mod liquidate;
+pub mod refresh_obligation;
+pub mod refresh_reserve;
 pub mod repay;
 pub mod withdraw;
 
@@ -11,5 +14,8 @@ pub use borrow::*;
 pub use deposit::*;
 pub use init_obligation::*;
 pub use initialize_market::*;
+pub use liquidate::*;
+pub use refresh_obligation::*;
+pub use refresh_reserve::*;
 pub use repay::*;
 pub use withdraw::*;

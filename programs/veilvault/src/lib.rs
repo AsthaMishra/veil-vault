@@ -45,4 +45,16 @@ pub mod veilvault {
     pub fn withdraw(ctx: Context<Withdraw>, collateral_amount: u64) -> Result<()> {
         instructions::withdraw::withdraw(ctx, collateral_amount)
     }
+
+    pub fn refresh_reserve(ctx: Context<RefreshReserve>) -> Result<()> {
+        instructions::refresh_reserve::refresh_reserve(ctx)
+    }
+
+    pub fn refresh_obligation(ctx: Context<RefreshObligation>) -> Result<()> {
+        instructions::refresh_obligation::refresh_obligation(ctx)
+    }
+
+    pub fn liquidate(ctx: Context<Liquidate>, repay_amount: u64) -> Result<()> {
+        instructions::liquidate::liquidate(ctx, repay_amount)
+    }
 }

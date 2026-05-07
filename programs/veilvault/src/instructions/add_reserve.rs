@@ -122,6 +122,7 @@ pub fn add_reserve(ctx: Context<AddReserve>, args: AddReserveArgs) -> Result<()>
     });
 
     reserve.config.init(args.config)?;
+    // pyth_oracle is included in args.config and written by ReserveConfig::init
 
     Ok(())
 }

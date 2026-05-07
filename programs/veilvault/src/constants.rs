@@ -16,3 +16,6 @@ pub const MAX_UTILIZATION_BPS: u16 = 10_000;
 pub const MAX_AGE_SECONDS: i64 = 60; // price stale after 60s
 pub const MAX_DEPOSITS_COUNT_IN_RESERVE: usize = 8;
 pub const MAX_BORROW_COUNT_IN_RESERVE: usize = 8;
+
+/// Max fraction of an unhealthy obligation's debt repayable in one liquidation (50%).
+pub const MAX_LIQUIDATION_CLOSE_FACTOR_PCT: u128 = 50;

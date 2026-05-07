@@ -180,6 +180,7 @@ describe("veilvault", () => {
             depositLimit: new anchor.BN(1_000_000_000),
             borrowLimit: new anchor.BN(800_000_000),
             protocolFee: 50,
+            pythOracle: new PublicKey(new Uint8Array(32)),
           },
         })
         .accountsStrict({
@@ -242,6 +243,7 @@ describe("veilvault", () => {
               depositLimit: new anchor.BN(1_000_000_000),
               borrowLimit: new anchor.BN(800_000_000),
               protocolFee: 50,
+              pythOracle: new PublicKey(new Uint8Array(32)),
             },
           })
           .accountsStrict({
@@ -410,15 +412,31 @@ describe("veilvault", () => {
   });
 
   // ─── borrow ──────────────────────────────────────────────────────────
+  //
+  // Each borrow requires a fresh refresh_obligation in the same slot.
+  // market_price_sf = 0 (no Pyth feed on localnet), so borrow market values
+  // stay 0 → health_factor() = None → infinitely healthy → borrows allowed.
+
+  async function buildRefreshObligationIx(): Promise<anchor.web3.TransactionInstruction> {
+    return program.methods
+      .refreshObligation()
+      .accountsStrict({
+        lendingMarket: lendingMarketPda,
+        obligation: obligationPda,
+      })
+      .remainingAccounts([
+        { pubkey: reservePda, isWritable: false, isSigner: false },
+      ])
+      .instruction();
+  }
 
   describe("borrow", () => {
     const BORROW_AMOUNT = 500_000; // 0.5 tokens
 
     it("transfers tokens from vault to borrower and records debt in obligation", async () => {
-      const userBefore = await getAccount(provider.connection, userTokenAccount);
-      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
-
-      await program.methods
+      // refresh_obligation + borrow must be in the same slot (staleness check)
+      const refreshIx = await buildRefreshObligationIx();
+      const borrowIx = await program.methods
         .borrow(new anchor.BN(BORROW_AMOUNT))
         .accountsStrict({
           borrower: user.publicKey,
@@ -430,8 +448,13 @@ describe("veilvault", () => {
           userTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .signers([user])
-        .rpc();
+        .instruction();
+
+      const userBefore = await getAccount(provider.connection, userTokenAccount);
+      const vaultBefore = await getAccount(provider.connection, liquidityVaultPda);
+
+      const tx = new anchor.web3.Transaction().add(refreshIx, borrowIx);
+      await provider.sendAndConfirm(tx, [user]);
 
       const userAfter = await getAccount(provider.connection, userTokenAccount);
       const vaultAfter = await getAccount(provider.connection, liquidityVaultPda);

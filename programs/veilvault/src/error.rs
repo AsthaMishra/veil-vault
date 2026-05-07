@@ -34,4 +34,16 @@ pub enum LendingError {
     BorrowRateDecreased,
     #[msg("Invalid amount send dby user")]
     InvalidAmount,
+    #[msg("Oracle price is stale")]
+    PriceStale,
+    #[msg("Oracle price is not valid")]
+    PriceNotValid,
+    #[msg("Oracle confidence interval too wide")]
+    PriceConfidenceTooWide,
+    #[msg("Obligation is unhealthy")]
+    UnhealthyObligation,
+    #[msg("Obligation must be refreshed before borrowing")]
+    ObligationStale,
+    #[msg("Obligation is healthy and cannot be liquidated")]
+    ObligationHealthy,
 }

@@ -16,14 +16,14 @@ pub const RESERVE_VERSION: u64 = 1;
 // with no implicit compiler-inserted gaps (required for bytemuck::Pod).
 //
 // Offsets:
-//   liquidity   (align 16, 160 bytes): offset    0
-//   config      (align  8,  32 bytes): offset  160
-//   collateral  (align  8, 1096 bytes): offset  192
-//   version     (align  8,   8 bytes): offset 1288
-//   last_update_slot                  offset 1296
-//   lending_market (align 1, 32 bytes): offset 1304
-//   bump        (align  1,   1 byte):  offset 1336
-//   padding     (align  1,   7 bytes): offset 1337 → total 1344, 1344 % 16 = 0 ✓
+//   liquidity   (align 16, 192 bytes): offset    0
+//   config      (align  8,  64 bytes): offset  192
+//   collateral  (align  8, 1096 bytes): offset  256
+//   version     (align  8,   8 bytes): offset 1352
+//   last_update_slot                  offset 1360
+//   lending_market (align 1, 32 bytes): offset 1368
+//   bump        (align  1,   1 byte):  offset 1400
+//   padding     (align  1,   7 bytes): offset 1401 → total 1408, 1408 % 16 = 0 ✓
 
 #[account(zero_copy)]
 #[repr(C)]
@@ -142,7 +142,8 @@ impl Reserve {
 //   status (u8):                     offset 28
 //   loan_to_value_pct (u8):          offset 29
 //   liquidation_threshold_pct (u8):  offset 30
-//   padding (u8):                    offset 31 → total 32, 32 % 8 = 0 ✓
+//   padding (u8):                    offset 31
+//   pyth_oracle (Pubkey):            offset 32 → total 64, 64 % 8 = 0 ✓
 
 #[zero_copy]
 #[repr(C)]
@@ -160,6 +161,8 @@ pub struct ReserveConfig {
     pub loan_to_value_pct: u8,
     pub liquidation_threshold_pct: u8,
     pub padding: u8,
+    /// Pyth PriceUpdateV2 account for this reserve's asset.
+    pub pyth_oracle: Pubkey,
 }
 
 impl Default for ReserveConfig {
@@ -181,6 +184,7 @@ pub struct InitReserveConfigParams {
     pub deposit_limit: u64,
     pub borrow_limit: u64,
     pub protocol_fee: u16,
+    pub pyth_oracle: Pubkey,
 }
 
 impl ReserveConfig {
@@ -197,6 +201,7 @@ impl ReserveConfig {
         self.loan_to_value_pct = params.loan_to_value_pct;
         self.liquidation_threshold_pct = params.liquidation_threshold_pct;
         self.padding = 0;
+        self.pyth_oracle = params.pyth_oracle;
         self.validate()?;
         Ok(())
     }
@@ -289,11 +294,13 @@ impl ReserveConfig {
 //   borrowed_amount_sf (u128):           offset   0
 //   cumulative_borrow_rate_sf (u128):    offset  16
 //   accumulated_protocol_fees (u128):    offset  32
-//   mint (Pubkey):                       offset  48
-//   supply_vault (Pubkey):               offset  80
-//   fee_vault (Pubkey):                  offset 112
-//   available_amount (u64):              offset 144
-//   padding ([u8;8]):                    offset 152 → total 160, 160 % 16 = 0 ✓
+//   market_price_sf (u128):             offset  48  ← USD price × RATE_SCALE
+//   mint (Pubkey):                       offset  64
+//   supply_vault (Pubkey):               offset  96
+//   fee_vault (Pubkey):                  offset 128
+//   available_amount (u64):              offset 160
+//   price_last_updated_ts (i64):         offset 168  ← unix ts from Pyth
+//   padding ([u8;16]):                   offset 176 → total 192, 192 % 16 = 0 ✓
 
 pub struct NewReserveLiquidityParams {
     pub mint: Pubkey,
@@ -308,11 +315,15 @@ pub struct ReserveLiquidity {
     pub borrowed_amount_sf: u128,
     pub cumulative_borrow_rate_sf: u128,
     pub accumulated_protocol_fees: u128,
+    /// USD price of the reserve asset, scaled by RATE_SCALE. Set by refresh_reserve.
+    pub market_price_sf: u128,
     pub mint: Pubkey,
     pub supply_vault: Pubkey,
     pub fee_vault: Pubkey,
     pub available_amount: u64,
-    pub padding: [u8; 8],
+    /// Unix timestamp of the last Pyth price update.
+    pub price_last_updated_ts: i64,
+    pub padding: [u8; 16],
 }
 
 impl Default for ReserveLiquidity {
@@ -328,11 +339,13 @@ impl ReserveLiquidity {
         self.borrowed_amount_sf = 0;
         self.cumulative_borrow_rate_sf = RATE_SCALE;
         self.accumulated_protocol_fees = 0;
+        self.market_price_sf = 0;
         self.mint = params.mint;
         self.supply_vault = params.supply_vault;
         self.fee_vault = params.fee_vault;
         self.available_amount = 0;
-        self.padding = [0; 8];
+        self.price_last_updated_ts = 0;
+        self.padding = [0; 16];
     }
 
     pub fn deposit(&mut self, amount: u64) -> Result<()> {
@@ -575,6 +588,7 @@ mod tests {
             loan_to_value_pct: 75,
             liquidation_threshold_pct: 80,
             padding: 0,
+            pyth_oracle: Pubkey::default(),
         }
     }
 
@@ -690,11 +704,13 @@ mod tests {
             borrowed_amount_sf: 0,
             cumulative_borrow_rate_sf: RATE_SCALE,
             accumulated_protocol_fees: 0,
+            market_price_sf: 0,
             mint: Pubkey::default(),
             supply_vault: Pubkey::default(),
             fee_vault: Pubkey::default(),
             available_amount: 0,
-            padding: [0; 8],
+            price_last_updated_ts: 0,
+            padding: [0; 16],
         }
     }
 
@@ -842,6 +858,7 @@ mod tests {
                 deposit_limit: 1_000_000,
                 borrow_limit: 800_000,
                 protocol_fee: 500,
+                pyth_oracle: Pubkey::default(),
             })
             .unwrap();
 
