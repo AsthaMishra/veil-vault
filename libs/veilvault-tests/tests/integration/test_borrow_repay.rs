@@ -238,6 +238,10 @@ fn test_partial_repay_leaves_debt() {
         &[&user],
     );
 
+    // advance one slot so the second repay tx gets a fresh blockhash (avoids AlreadyProcessed
+    // when both halves are byte-identical instructions)
+    advance_slots(&mut env.svm, 1);
+
     // repay remaining half — should succeed
     send(
         &mut env.svm,

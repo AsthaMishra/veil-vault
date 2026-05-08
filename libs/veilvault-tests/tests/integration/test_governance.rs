@@ -231,7 +231,26 @@ fn test_set_pause_blocks_withdraw() {
 fn test_update_reserve_config_makes_reserve_inactive() {
     let mut env = setup_env();
 
-    // update config: status = 1 → inactive
+    // set up user and get cTokens BEFORE making the reserve inactive
+    let user = Keypair::new();
+    env.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
+    let token_acct = create_token_account(&mut env.svm, &user, env.reserve_mint, user.pubkey());
+    let ctoken_acct = create_token_account(&mut env.svm, &user, env.collateral_mint, user.pubkey());
+    let owner_clone = Keypair::from_bytes(&env.owner.to_bytes()).unwrap();
+    mint_tokens(&mut env.svm, &owner_clone, env.reserve_mint, token_acct, DEPOSIT_AMOUNT);
+
+    send(
+        &mut env.svm,
+        &[ix_deposit(
+            user.pubkey(), env.lending_market, env.reserve, env.reserve_mint,
+            env.liquidity_vault, env.collateral_mint, token_acct, ctoken_acct, DEPOSIT_AMOUNT,
+        )],
+        &[&user],
+    );
+    let obligation = find_obligation(env.lending_market, user.pubkey()).0;
+    send(&mut env.svm, &[ix_init_obligation(user.pubkey(), env.lending_market, obligation)], &[&user]);
+
+    // NOW update config: status = 1 → inactive
     let owner = Keypair::from_bytes(&env.owner.to_bytes()).unwrap();
     send(
         &mut env.svm,
@@ -259,27 +278,6 @@ fn test_update_reserve_config_makes_reserve_inactive() {
     );
 
     // deposit_collateral checks is_active() — must now fail
-    let user = Keypair::new();
-    env.svm.airdrop(&user.pubkey(), 10_000_000_000).unwrap();
-    let token_acct = create_token_account(&mut env.svm, &user, env.reserve_mint, user.pubkey());
-    let ctoken_acct = create_token_account(&mut env.svm, &user, env.collateral_mint, user.pubkey());
-    let owner2 = Keypair::from_bytes(&env.owner.to_bytes()).unwrap();
-    mint_tokens(&mut env.svm, &owner2, env.reserve_mint, token_acct, DEPOSIT_AMOUNT);
-
-    // deposit itself only checks is_paused, not is_active — use deposit_collateral instead
-    // First deposit to get cTokens (deposit doesn't check is_active)
-    send(
-        &mut env.svm,
-        &[ix_deposit(
-            user.pubkey(), env.lending_market, env.reserve, env.reserve_mint,
-            env.liquidity_vault, env.collateral_mint, token_acct, ctoken_acct, DEPOSIT_AMOUNT,
-        )],
-        &[&user],
-    );
-    let obligation = find_obligation(env.lending_market, user.pubkey()).0;
-    send(&mut env.svm, &[ix_init_obligation(user.pubkey(), env.lending_market, obligation)], &[&user]);
-
-    // deposit_collateral must fail because reserve is inactive
     let result = try_send(
         &mut env.svm,
         &[ix_deposit_collateral(

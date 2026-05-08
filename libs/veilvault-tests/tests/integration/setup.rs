@@ -155,6 +155,7 @@ pub fn advance_slots(svm: &mut LiteSVM, slots: u64) {
     clock.slot += slots;
     clock.unix_timestamp += slots as i64;
     svm.set_sysvar(&clock);
+    svm.expire_blockhash(); // rotate hash so identical ixs get a new tx signature
 }
 
 pub fn current_slot(svm: &LiteSVM) -> u64 {
