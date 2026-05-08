@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 
 use crate::{
-    constants::RATE_SCALE,
     error::LendingError,
     state::{LendingMarket, Obligation, Reserve},
 };
@@ -64,19 +63,24 @@ pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     let reserve_key = ctx.accounts.reserve.key();
 
     // accrue interest so the rate snapshot we store is current, then update reserve debt
-    let cumulative_borrow_rate_sf = {
+    let (cumulative_borrow_rate_sf, reserve_price_sf) = {
         let mut reserve = ctx.accounts.reserve.load_mut()?;
         require!(reserve.config.is_active(), LendingError::InvalidConfig);
+        // price must be set by refresh_reserve — prevents borrowing against stale/zero price
+        require!(reserve.liquidity.market_price_sf > 0, LendingError::PriceNotValid);
         reserve.accrue_interest(clock.slot)?;
         reserve.borrow(amount)?; // checks borrow_limit + insufficient_liquidity
-        reserve.liquidity.cumulative_borrow_rate_sf
+        (
+            reserve.liquidity.cumulative_borrow_rate_sf,
+            reserve.liquidity.market_price_sf,
+        )
     };
 
     // accrue interest on any existing debt for this reserve, then record new borrow
     {
         let mut obligation = ctx.accounts.obligation.load_mut()?;
 
-        // require a fresh refresh_obligation in the same or prior slot
+        // require a fresh refresh_obligation in the same slot
         require!(
             !obligation.last_update.is_slot_stale(clock.slot),
             LendingError::ObligationStale
@@ -88,10 +92,38 @@ pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
 
         obligation.borrow(reserve_key, amount as u128, cumulative_borrow_rate_sf)?;
 
-        // health factor check: after adding the new debt, obligation must still be healthy
-        if let Some(hf) = obligation.health_factor() {
-            require!(hf >= RATE_SCALE, LendingError::UnhealthyObligation);
-        }
+        // Inline health-factor check that accounts for the new borrow.
+        //
+        // obligation.health_factor() uses market_value_sf, which refresh_obligation populates
+        // for existing borrows (staleness check above ensures it ran this slot). The newly
+        // added borrow has market_value_sf = 0 (not yet priced), so we compute its USD value
+        // inline using the reserve's current price and add it to the existing borrow total.
+        let collateral_value_sf: u128 = obligation.deposits
+            [..obligation.deposits_count as usize]
+            .iter()
+            .filter(|d| d.is_active())
+            .map(|d| d.market_value_sf)
+            .sum();
+
+        let existing_borrow_value_sf: u128 = obligation.borrows
+            [..obligation.borrows_count as usize]
+            .iter()
+            .filter(|b| b.is_active())
+            .map(|b| b.market_value_sf)
+            .sum();
+
+        let new_borrow_value_sf = (amount as u128)
+            .checked_mul(reserve_price_sf)
+            .ok_or(LendingError::MathOverflow)?;
+
+        let total_borrow_value_sf = existing_borrow_value_sf
+            .checked_add(new_borrow_value_sf)
+            .ok_or(LendingError::MathOverflow)?;
+
+        require!(
+            collateral_value_sf >= total_borrow_value_sf,
+            LendingError::UnhealthyObligation
+        );
     }
 
     // CPI: transfer underlying tokens from liquidity_vault → borrower (lending_market signs)

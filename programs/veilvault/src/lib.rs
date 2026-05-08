@@ -8,6 +8,7 @@ pub mod utils;
 
 pub use error::*;
 use instructions::*;
+use state::InitReserveConfigParams;
 
 declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 
@@ -28,6 +29,20 @@ pub mod veilvault {
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         instructions::deposit::deposit(ctx, amount)
+    }
+
+    pub fn deposit_collateral(
+        ctx: Context<DepositCollateral>,
+        collateral_amount: u64,
+    ) -> Result<()> {
+        instructions::deposit_collateral::deposit_collateral(ctx, collateral_amount)
+    }
+
+    pub fn withdraw_collateral(
+        ctx: Context<WithdrawCollateral>,
+        collateral_amount: u64,
+    ) -> Result<()> {
+        instructions::withdraw_collateral::withdraw_collateral(ctx, collateral_amount)
     }
 
     pub fn init_obligation(ctx: Context<InitObligation>) -> Result<()> {
@@ -56,5 +71,23 @@ pub mod veilvault {
 
     pub fn liquidate(ctx: Context<Liquidate>, repay_amount: u64) -> Result<()> {
         instructions::liquidate::liquidate(ctx, repay_amount)
+    }
+
+    pub fn set_pause(ctx: Context<SetPause>, paused: bool) -> Result<()> {
+        instructions::set_pause::set_pause(ctx, paused)
+    }
+
+    pub fn update_reserve_config(
+        ctx: Context<UpdateReserveConfig>,
+        new_config: InitReserveConfigParams,
+    ) -> Result<()> {
+        instructions::update_reserve_config::update_reserve_config(ctx, new_config)
+    }
+
+    pub fn update_market_authority(
+        ctx: Context<UpdateMarketAuthority>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        instructions::update_market_authority::update_market_authority(ctx, new_authority)
     }
 }

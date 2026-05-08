@@ -23,7 +23,7 @@ pub struct RefreshObligation<'info> {
 /// scoped block. Returns owned values so no lifetime escapes.
 /// AccountLoader internally does the same bytemuck cast after skipping the
 /// 8-byte Anchor discriminator.
-fn read_reserve_fields(account: &AccountInfo) -> Result<(u128, u128, u128, u8)> {
+fn read_reserve_fields(account: &AccountInfo) -> Result<(u128, u128, u128, u8, u128)> {
     let data = account.try_borrow_data()?;
     let size = std::mem::size_of::<Reserve>();
     if data.len() < 8 + size {
@@ -36,6 +36,7 @@ fn read_reserve_fields(account: &AccountInfo) -> Result<(u128, u128, u128, u8)> 
         reserve.liquidity.total_supply()?,
         reserve.collateral.mint_total_supply as u128,
         reserve.config.liquidation_threshold_pct,
+        reserve.liquidity.cumulative_borrow_rate_sf,
     ))
 }
 
@@ -59,11 +60,14 @@ pub fn refresh_obligation(ctx: Context<RefreshObligation>) -> Result<()> {
                 error!(LendingError::BorrowNotFound)
             })?;
 
-        let (price_sf, ..) = read_reserve_fields(reserve_account)?;
+        let (price_sf, _, _, _, cumulative_rate_sf) = read_reserve_fields(reserve_account)?;
         if price_sf == 0 {
             // oracle not yet refreshed via refresh_reserve — leave market_value_sf at 0
             continue;
         }
+
+        // accrue interest to current reserve rate so market_value_sf reflects real debt
+        obligation.accrue_interest(i, cumulative_rate_sf)?;
 
         // borrow value in USD × RATE_SCALE
         // borrowed_amount_sf = raw_amount × RATE_SCALE  →  /RATE_SCALE gives raw_amount
@@ -90,7 +94,7 @@ pub fn refresh_obligation(ctx: Context<RefreshObligation>) -> Result<()> {
                 error!(LendingError::DepositNotFound)
             })?;
 
-        let (price_sf, total_liquidity, ctoken_supply, liq_threshold_pct) =
+        let (price_sf, total_liquidity, ctoken_supply, liq_threshold_pct, _) =
             read_reserve_fields(reserve_account)?;
         if price_sf == 0 {
             continue;

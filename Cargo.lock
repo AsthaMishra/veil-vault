@@ -5785,6 +5785,7 @@ version = "0.1.0"
 dependencies = [
  "litesvm",
  "sha2 0.10.9",
+ "solana-program",
  "solana-sdk",
  "spl-token 7.0.0",
 ]

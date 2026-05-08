@@ -1,5 +1,6 @@
 use super::setup::*;
 use solana_sdk::signature::{Keypair, Signer};
+use solana_sdk::pubkey::Pubkey;
 
 const DEPOSIT_AMOUNT: u64 = 1_000_000; // 1 USDC (6 decimals)
 
@@ -191,4 +192,93 @@ fn test_withdraw_more_than_deposited_fails() {
         &[&user],
     );
     assert!(result.is_err(), "withdrawing more cTokens than held should fail");
+}
+
+#[test]
+fn test_withdraw_zero_fails() {
+    let mut env = setup_env();
+    let (user, token_acct, ctoken_acct) = new_user(&mut env, DEPOSIT_AMOUNT);
+
+    send(
+        &mut env.svm,
+        &[ix_deposit(
+            user.pubkey(),
+            env.lending_market,
+            env.reserve,
+            env.reserve_mint,
+            env.liquidity_vault,
+            env.collateral_mint,
+            token_acct,
+            ctoken_acct,
+            DEPOSIT_AMOUNT,
+        )],
+        &[&user],
+    );
+
+    let result = try_send(
+        &mut env.svm,
+        &[ix_withdraw(
+            user.pubkey(),
+            env.lending_market,
+            env.reserve,
+            env.reserve_mint,
+            env.liquidity_vault,
+            env.collateral_mint,
+            ctoken_acct,
+            token_acct,
+            0,
+        )],
+        &[&user],
+    );
+    assert!(result.is_err(), "withdraw(0) should fail");
+}
+
+#[test]
+fn test_partial_withdraw_leaves_correct_balance() {
+    let mut env = setup_env();
+    let (user, token_acct, ctoken_acct) = new_user(&mut env, DEPOSIT_AMOUNT * 2);
+
+    send(
+        &mut env.svm,
+        &[ix_deposit(
+            user.pubkey(),
+            env.lending_market,
+            env.reserve,
+            env.reserve_mint,
+            env.liquidity_vault,
+            env.collateral_mint,
+            token_acct,
+            ctoken_acct,
+            DEPOSIT_AMOUNT * 2,
+        )],
+        &[&user],
+    );
+
+    let half = DEPOSIT_AMOUNT;
+    send(
+        &mut env.svm,
+        &[ix_withdraw(
+            user.pubkey(),
+            env.lending_market,
+            env.reserve,
+            env.reserve_mint,
+            env.liquidity_vault,
+            env.collateral_mint,
+            ctoken_acct,
+            token_acct,
+            half,
+        )],
+        &[&user],
+    );
+
+    assert_eq!(
+        token_balance(&env.svm, ctoken_acct),
+        DEPOSIT_AMOUNT,
+        "half the cTokens should remain after partial withdraw"
+    );
+    assert_eq!(
+        token_balance(&env.svm, env.liquidity_vault),
+        DEPOSIT_AMOUNT,
+        "vault should hold the remaining half"
+    );
 }

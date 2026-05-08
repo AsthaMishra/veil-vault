@@ -27,7 +27,6 @@ pub struct Liquidate<'info> {
     pub obligation: AccountLoader<'info, Obligation>,
 
     // ── Repay side (debt reserve) ─────────────────────────────────────────────
-
     /// Reserve whose debt the liquidator is repaying.
     #[account(
         mut,
@@ -52,7 +51,6 @@ pub struct Liquidate<'info> {
     pub liquidator_repay_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     // ── Withdraw side (collateral reserve) ───────────────────────────────────
-
     /// Reserve whose cToken collateral is being seized.
     #[account(
         mut,
@@ -84,7 +82,7 @@ pub struct Liquidate<'info> {
     pub liquidator_collateral_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
-}
+}    
 
 pub fn liquidate(ctx: Context<Liquidate>, repay_amount: u64) -> Result<()> {
     require!(repay_amount > 0, LendingError::InvalidAmount);
@@ -199,7 +197,10 @@ pub fn liquidate(ctx: Context<Liquidate>, repay_amount: u64) -> Result<()> {
         CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked {
-                from: ctx.accounts.liquidator_repay_token_account.to_account_info(),
+                from: ctx
+                    .accounts
+                    .liquidator_repay_token_account
+                    .to_account_info(),
                 mint: ctx.accounts.repay_reserve_mint.to_account_info(),
                 to: ctx.accounts.repay_liquidity_vault.to_account_info(),
                 authority: ctx.accounts.liquidator.to_account_info(),

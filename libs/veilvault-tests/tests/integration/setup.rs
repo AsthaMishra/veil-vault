@@ -1,5 +1,6 @@
 use litesvm::LiteSVM;
 use sha2::{Digest, Sha256};
+use solana_program::program_pack::Pack;
 use solana_sdk::{
     clock::Clock,
     instruction::{AccountMeta, Instruction},
@@ -54,8 +55,8 @@ pub fn setup_env() -> TestEnv {
     let mut svm = LiteSVM::new();
 
     // load compiled program
-    let so_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/deploy/veilvault.so");
+    let so_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/veilvault.so");
     let program_bytes = std::fs::read(&so_path).unwrap_or_else(|e| {
         panic!(
             "veilvault.so not found — run `cargo build-sbf` first.\nPath: {}\nError: {}",
@@ -92,7 +93,16 @@ pub fn setup_env() -> TestEnv {
     let pyth_oracle = super::pyth::create_price_account(&mut svm, 1.0, BASE_TIMESTAMP);
 
     // initialize_market
-    send(&mut svm, &[ix_initialize_market(owner.pubkey(), lending_market, [0u8; 32], 50)], &[&owner]);
+    send(
+        &mut svm,
+        &[ix_initialize_market(
+            owner.pubkey(),
+            lending_market,
+            [0u8; 32],
+            50,
+        )],
+        &[&owner],
+    );
 
     // add_reserve with sensible defaults
     send(
@@ -177,7 +187,12 @@ pub fn create_spl_mint(svm: &mut LiteSVM, payer: &Keypair, mint_kp: &Keypair, de
 }
 
 /// Create a plain SPL token account owned by `owner`.
-pub fn create_token_account(svm: &mut LiteSVM, payer: &Keypair, mint: Pubkey, owner: Pubkey) -> Pubkey {
+pub fn create_token_account(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    mint: Pubkey,
+    owner: Pubkey,
+) -> Pubkey {
     let ta_kp = Keypair::new();
     let rent = solana_sdk::rent::Rent::default().minimum_balance(spl_token::state::Account::LEN);
     let ixs = [
@@ -188,20 +203,21 @@ pub fn create_token_account(svm: &mut LiteSVM, payer: &Keypair, mint: Pubkey, ow
             spl_token::state::Account::LEN as u64,
             &spl_token::ID,
         ),
-        spl_token::instruction::initialize_account(
-            &spl_token::ID,
-            &ta_kp.pubkey(),
-            &mint,
-            &owner,
-        )
-        .unwrap(),
+        spl_token::instruction::initialize_account(&spl_token::ID, &ta_kp.pubkey(), &mint, &owner)
+            .unwrap(),
     ];
     send(svm, &ixs, &[payer, &ta_kp]);
     ta_kp.pubkey()
 }
 
 /// Mint `amount` tokens to `dest` (payer is the mint authority).
-pub fn mint_tokens(svm: &mut LiteSVM, authority: &Keypair, mint: Pubkey, dest: Pubkey, amount: u64) {
+pub fn mint_tokens(
+    svm: &mut LiteSVM,
+    authority: &Keypair,
+    mint: Pubkey,
+    dest: Pubkey,
+    amount: u64,
+) {
     let ix = spl_token::instruction::mint_to(
         &spl_token::ID,
         &mint,
@@ -228,16 +244,24 @@ pub fn token_balance(svm: &LiteSVM, account: Pubkey) -> u64 {
 
 pub fn send(svm: &mut LiteSVM, ixs: &[Instruction], signers: &[&Keypair]) {
     let blockhash = svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(ixs, Some(&signers[0].pubkey()), signers, blockhash);
+    let tx =
+        Transaction::new_signed_with_payer(ixs, Some(&signers[0].pubkey()), signers, blockhash);
     svm.send_transaction(tx)
         .unwrap_or_else(|e| panic!("transaction failed: {e:?}"));
 }
 
 /// Try sending and return the error string instead of panicking.
-pub fn try_send(svm: &mut LiteSVM, ixs: &[Instruction], signers: &[&Keypair]) -> Result<(), String> {
+pub fn try_send(
+    svm: &mut LiteSVM,
+    ixs: &[Instruction],
+    signers: &[&Keypair],
+) -> Result<(), String> {
     let blockhash = svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(ixs, Some(&signers[0].pubkey()), signers, blockhash);
-    svm.send_transaction(tx).map(|_| ()).map_err(|e| format!("{e:?}"))
+    let tx =
+        Transaction::new_signed_with_payer(ixs, Some(&signers[0].pubkey()), signers, blockhash);
+    svm.send_transaction(tx)
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
 }
 
 // ── PDA derivation ────────────────────────────────────────────────────────────
@@ -358,7 +382,11 @@ pub fn ix_add_reserve(
     }
 }
 
-pub fn ix_init_obligation(owner: Pubkey, lending_market: Pubkey, obligation: Pubkey) -> Instruction {
+pub fn ix_init_obligation(
+    owner: Pubkey,
+    lending_market: Pubkey,
+    obligation: Pubkey,
+) -> Instruction {
     Instruction {
         program_id: veilvault_id(),
         accounts: vec![
@@ -487,7 +515,11 @@ pub fn ix_repay(
     }
 }
 
-pub fn ix_refresh_reserve(lending_market: Pubkey, reserve: Pubkey, pyth_oracle: Pubkey) -> Instruction {
+pub fn ix_refresh_reserve(
+    lending_market: Pubkey,
+    reserve: Pubkey,
+    pyth_oracle: Pubkey,
+) -> Instruction {
     Instruction {
         program_id: veilvault_id(),
         accounts: vec![
@@ -516,5 +548,146 @@ pub fn ix_refresh_obligation(
         program_id: veilvault_id(),
         accounts,
         data: disc("refresh_obligation").to_vec(),
+    }
+}
+
+pub fn ix_deposit_collateral(
+    depositor: Pubkey,
+    lending_market: Pubkey,
+    reserve: Pubkey,
+    reserve_mint: Pubkey,
+    collateral_mint: Pubkey,
+    user_collateral_account: Pubkey,
+    collateral_supply_vault: Pubkey,
+    obligation: Pubkey,
+    collateral_amount: u64,
+) -> Instruction {
+    let mut data = disc("deposit_collateral").to_vec();
+    data.extend_from_slice(&collateral_amount.to_le_bytes());
+    Instruction {
+        program_id: veilvault_id(),
+        accounts: vec![
+            AccountMeta::new(depositor, true),
+            AccountMeta::new_readonly(lending_market, false),
+            AccountMeta::new_readonly(reserve, false),
+            AccountMeta::new_readonly(reserve_mint, false),
+            AccountMeta::new(collateral_mint, false),
+            AccountMeta::new(user_collateral_account, false),
+            AccountMeta::new(collateral_supply_vault, false),
+            AccountMeta::new(obligation, false),
+            AccountMeta::new_readonly(spl_token::ID, false),
+        ],
+        data,
+    }
+}
+
+pub fn ix_withdraw_collateral(
+    depositor: Pubkey,
+    lending_market: Pubkey,
+    reserve: Pubkey,
+    reserve_mint: Pubkey,
+    collateral_mint: Pubkey,
+    collateral_supply_vault: Pubkey,
+    user_collateral_account: Pubkey,
+    obligation: Pubkey,
+    collateral_amount: u64,
+) -> Instruction {
+    let mut data = disc("withdraw_collateral").to_vec();
+    data.extend_from_slice(&collateral_amount.to_le_bytes());
+    Instruction {
+        program_id: veilvault_id(),
+        accounts: vec![
+            AccountMeta::new(depositor, true),
+            AccountMeta::new_readonly(lending_market, false),
+            AccountMeta::new_readonly(reserve, false),
+            AccountMeta::new_readonly(reserve_mint, false),
+            AccountMeta::new(collateral_mint, false),
+            AccountMeta::new(collateral_supply_vault, false),
+            AccountMeta::new(user_collateral_account, false),
+            AccountMeta::new(obligation, false),
+            AccountMeta::new_readonly(spl_token::ID, false),
+        ],
+        data,
+    }
+}
+
+pub fn ix_liquidate(
+    liquidator: Pubkey,
+    lending_market: Pubkey,
+    obligation: Pubkey,
+    repay_reserve: Pubkey,
+    repay_reserve_mint: Pubkey,
+    repay_liquidity_vault: Pubkey,
+    liquidator_repay_token_account: Pubkey,
+    withdraw_reserve: Pubkey,
+    withdraw_collateral_mint: Pubkey,
+    collateral_supply_vault: Pubkey,
+    liquidator_collateral_account: Pubkey,
+    repay_amount: u64,
+) -> Instruction {
+    let mut data = disc("liquidate").to_vec();
+    data.extend_from_slice(&repay_amount.to_le_bytes());
+    Instruction {
+        program_id: veilvault_id(),
+        accounts: vec![
+            AccountMeta::new(liquidator, true),
+            AccountMeta::new_readonly(lending_market, false),
+            AccountMeta::new(obligation, false),
+            AccountMeta::new(repay_reserve, false),
+            AccountMeta::new_readonly(repay_reserve_mint, false),
+            AccountMeta::new(repay_liquidity_vault, false),
+            AccountMeta::new(liquidator_repay_token_account, false),
+            AccountMeta::new(withdraw_reserve, false),
+            AccountMeta::new(withdraw_collateral_mint, false),
+            AccountMeta::new(collateral_supply_vault, false),
+            AccountMeta::new(liquidator_collateral_account, false),
+            AccountMeta::new_readonly(spl_token::ID, false),
+        ],
+        data,
+    }
+}
+
+pub fn ix_update_reserve_config(
+    owner: Pubkey,
+    lending_market: Pubkey,
+    reserve_mint: Pubkey,
+    reserve: Pubkey,
+    cfg: ReserveConfigArgs,
+) -> Instruction {
+    let mut data = disc("update_reserve_config").to_vec();
+    data.push(cfg.status);
+    data.extend_from_slice(&cfg.min_borrow_rate_bps.to_le_bytes());
+    data.extend_from_slice(&cfg.optimal_borrow_rate_bps.to_le_bytes());
+    data.extend_from_slice(&cfg.max_borrow_rate_bps.to_le_bytes());
+    data.extend_from_slice(&cfg.optimal_utilization_bps.to_le_bytes());
+    data.push(cfg.loan_to_value_pct);
+    data.push(cfg.liquidation_threshold_pct);
+    data.extend_from_slice(&cfg.liquidation_bonus_pct.to_le_bytes());
+    data.extend_from_slice(&cfg.deposit_limit.to_le_bytes());
+    data.extend_from_slice(&cfg.borrow_limit.to_le_bytes());
+    data.extend_from_slice(&cfg.protocol_fee.to_le_bytes());
+    data.extend_from_slice(cfg.pyth_oracle.as_ref());
+    Instruction {
+        program_id: veilvault_id(),
+        accounts: vec![
+            AccountMeta::new_readonly(owner, true),
+            AccountMeta::new_readonly(lending_market, false),
+            AccountMeta::new_readonly(reserve_mint, false),
+            AccountMeta::new(reserve, false),
+        ],
+        data,
+    }
+}
+
+pub fn ix_set_pause(owner: Pubkey, lending_market: Pubkey, paused: bool) -> Instruction {
+    let mut data = disc("set_pause").to_vec();
+    data.push(paused as u8);
+    Instruction {
+        program_id: veilvault_id(),
+        accounts: vec![
+            AccountMeta::new_readonly(owner, true),
+            AccountMeta::new(lending_market, false),
+        ],
+        data,
     }
 }
