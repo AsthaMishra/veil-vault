@@ -1335,6 +1335,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "circuit-builder"
+version = "0.1.0"
+dependencies = [
+ "arcis-compiler",
+]
+
+[[package]]
 name = "combine"
 version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

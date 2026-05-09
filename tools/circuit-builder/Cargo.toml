@@ -1,0 +1,11 @@
+[package]
+name = "circuit-builder"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "circuit-builder"
+path = "src/main.rs"
+
+[dependencies]
+arcis-compiler = { version = "=0.9.6", default-features = false }

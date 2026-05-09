@@ -3,6 +3,7 @@ members = [
     "programs/*",
     "libs/*",
     "encrypted-ixs",
+    "tools/circuit-builder",
 ]
 resolver = "2"
 
