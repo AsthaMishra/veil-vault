@@ -1,0 +1,15 @@
+[localnet]
+# number of nodes in the single cluster of the localnet
+nodes = 2
+nodes_ips = [
+  [172, 20, 0, 100],
+  [172, 20, 0, 101]
+]
+localnet_timeout_secs = 60
+backends = ["Cerberus"]
+
+# Cluster offsets for non-localnet deployments
+# Get your offset from `arcium init-mxe` or `arcium deploy`
+#
+# [clusters.devnet]
+# offset = 0

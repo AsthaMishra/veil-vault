@@ -46,4 +46,11 @@ pub enum LendingError {
     ObligationStale,
     #[msg("Obligation is healthy and cannot be liquidated")]
     ObligationHealthy,
+    // ── Arcium MPC errors ──────────────────────────────────────────────
+    #[msg("Arcium MPC computation was aborted or output verification failed")]
+    AbortedComputation,
+    #[msg("Arcium cluster is not set on this MXE")]
+    ClusterNotSet,
+    #[msg("PrivateObligation must be initialised before use")]
+    PrivateObligationNotInitialized,
 }

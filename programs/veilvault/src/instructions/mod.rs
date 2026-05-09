@@ -14,6 +14,12 @@ pub mod update_reserve_config;
 pub mod withdraw;
 pub mod withdraw_collateral;
 
+// ── Arcium confidential layer ──────────────────────────────────────────────────
+pub mod init_private_obligation;
+pub mod private_borrow;
+pub mod private_deposit_collateral;
+pub mod private_liquidate;
+
 pub use add_reserve::*;
 pub use borrow::*;
 pub use deposit::*;
@@ -29,3 +35,8 @@ pub use update_market_authority::*;
 pub use update_reserve_config::*;
 pub use withdraw::*;
 pub use withdraw_collateral::*;
+
+pub use init_private_obligation::*;
+pub use private_borrow::*;
+pub use private_deposit_collateral::*;
+pub use private_liquidate::*;

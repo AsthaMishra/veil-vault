@@ -2,6 +2,7 @@
 members = [
     "programs/*",
     "libs/*",
+    "encrypted-ixs",
 ]
 resolver = "2"
 
