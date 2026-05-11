@@ -36,7 +36,7 @@ pub struct PrivateObligation {
     pub is_initialized: bool,
 }
 
-/// Emitted when the MXE determines a position is under-c          ollateralised.
+/// Emitted when the MXE determines a position is under-collateralised.
 /// Liquidators listen for this event and then call execute_private_liquidation.
 #[event]
 pub struct LiquidatableEvent {

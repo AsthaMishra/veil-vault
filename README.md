@@ -225,3 +225,9 @@ The LiteSVM suite covers:
 - **Health factor deferred to refresh** — `borrow` requires `refresh_obligation` in the current slot; stale obligations cannot borrow
 - **Simpler than Kamino by design** — no elevation groups, withdrawal tickets, farms, or referral tiers
 - **Arcium dual-path** — plaintext path (standard instructions) and encrypted path (private instructions) coexist; users opt into privacy
+
+---
+
+## Known Limitations
+
+- **Arcium SDK 0.9.6 BPF stack frame**: `arcium_client::idl::arcium::utils::Account::try_from` generates a stack frame of ~865 KB, far exceeding Solana's 4096-byte per-function limit. This triggers a linker warning during `anchor build` but does not prevent the build from completing. Core lending instructions are unaffected. Fix pending upstream SDK update.
