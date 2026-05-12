@@ -13,12 +13,13 @@ use state::InitReserveConfigParams;
 
 declare_id!("CMbnY6XXekgVZvFHwmB6yC15TD5x7anD1XmHrm218Wbs");
 
+
 // ── Arcium computation-definition offsets ──────────────────────────────────────
 // Each offset is a deterministic u32 derived from the circuit function name.
 // These must match the names in encrypted-ixs/src/lib.rs exactly.
-pub const COMP_DEF_OFFSET_INIT_POSITION: u32 = comp_def_offset("init_position");
-pub const COMP_DEF_OFFSET_ADD_COLLATERAL: u32 = comp_def_offset("add_collateral");
-pub const COMP_DEF_OFFSET_ADD_BORROW: u32 = comp_def_offset("add_borrow");
+pub const COMP_DEF_OFFSET_INIT_POSITION: u32 = comp_def_offset("init_position_2");
+pub const COMP_DEF_OFFSET_ADD_COLLATERAL: u32 = comp_def_offset("add_collateral_2");
+pub const COMP_DEF_OFFSET_ADD_BORROW: u32 = comp_def_offset("add_borrow_2");
 pub const COMP_DEF_OFFSET_CHECK_HEALTH: u32 = comp_def_offset("check_health");
 
 #[arcium_program]
@@ -198,28 +199,28 @@ pub mod veilvault {
 
     // ── Arcium callbacks (invoked by MXE nodes, not by users) ────────────────
 
-    #[arcium_callback(encrypted_ix = "init_position")]
-    pub fn init_position_callback(
-        ctx: Context<InitPositionCallback>,
-        output: SignedComputationOutputs<InitPositionOutput>,
+    #[arcium_callback(encrypted_ix = "init_position_2")]
+    pub fn init_position_2_callback(
+        ctx: Context<InitPosition2Callback>,
+        output: SignedComputationOutputs<InitPosition2Output>,
     ) -> Result<()> {
-        instructions::init_private_obligation::init_position_callback(ctx, output)
+        instructions::init_private_obligation::init_position_2_callback(ctx, output)
     }
 
-    #[arcium_callback(encrypted_ix = "add_collateral")]
-    pub fn add_collateral_callback(
-        ctx: Context<AddCollateralCallback>,
-        output: SignedComputationOutputs<AddCollateralOutput>,
+    #[arcium_callback(encrypted_ix = "add_collateral_2")]
+    pub fn add_collateral_2_callback(
+        ctx: Context<AddCollateral2Callback>,
+        output: SignedComputationOutputs<AddCollateral2Output>,
     ) -> Result<()> {
-        instructions::private_deposit_collateral::add_collateral_callback(ctx, output)
+        instructions::private_deposit_collateral::add_collateral_2_callback(ctx, output)
     }
 
-    #[arcium_callback(encrypted_ix = "add_borrow")]
-    pub fn add_borrow_callback(
-        ctx: Context<AddBorrowCallback>,
-        output: SignedComputationOutputs<AddBorrowOutput>,
+    #[arcium_callback(encrypted_ix = "add_borrow_2")]
+    pub fn add_borrow_2_callback(
+        ctx: Context<AddBorrow2Callback>,
+        output: SignedComputationOutputs<AddBorrow2Output>,
     ) -> Result<()> {
-        instructions::private_borrow::add_borrow_callback(ctx, output)
+        instructions::private_borrow::add_borrow_2_callback(ctx, output)
     }
 
     #[arcium_callback(encrypted_ix = "check_health")]

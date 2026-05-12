@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 use arcium_anchor::prelude::*;
-use arcium_client::idl::arcium::types::CallbackAccount;
+use arcium_client::idl::arcium::types::{CallbackAccount, CircuitSource, OffChainCircuitSource};
+use arcium_macros::circuit_hash;
 
 use crate::{
     error::LendingError,
@@ -13,13 +14,20 @@ use crate::LendingError as ErrorCode;
 
 // ─── Comp-def registration ────────────────────────────────────────────────────
 
-/// One-time admin call: registers the `add_collateral` Arcis circuit on-chain.
+/// One-time admin call: registers the `add_collateral_2` Arcis circuit as OffChain source.
 pub fn add_collateral_comp_def(ctx: Context<AddCollateralCompDef>) -> Result<()> {
-    init_comp_def(ctx.accounts, None, None)?;
+    init_comp_def(
+        ctx.accounts,
+        Some(CircuitSource::OffChain(OffChainCircuitSource {
+            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/veilvault/build/add_collateral_2.arcis".to_string(),
+            hash: circuit_hash!("add_collateral_2"),
+        })),
+        None,
+    )?;
     Ok(())
 }
 
-#[init_computation_definition_accounts("add_collateral", payer)]
+#[init_computation_definition_accounts("add_collateral_2", payer)]
 #[derive(Accounts)]
 pub struct AddCollateralCompDef<'info> {
     #[account(mut)]
@@ -126,7 +134,7 @@ pub fn private_deposit_collateral(
         ctx.accounts,
         computation_offset,
         args,
-        vec![AddCollateralCallback::callback_ix(
+        vec![AddCollateral2Callback::callback_ix(
             computation_offset,
             &ctx.accounts.mxe_account,
             &[CallbackAccount {
@@ -141,7 +149,7 @@ pub fn private_deposit_collateral(
     Ok(())
 }
 
-#[queue_computation_accounts("add_collateral", depositor)]
+#[queue_computation_accounts("add_collateral_2", depositor)]
 #[derive(Accounts)]
 #[instruction(computation_offset: u64)]
 pub struct PrivateDepositCollateral<'info> {
@@ -260,17 +268,17 @@ pub struct PrivateDepositCollateral<'info> {
 
 // ─── Callback ─────────────────────────────────────────────────────────────────
 
-/// Stores the updated encrypted state after the MXE runs add_collateral.
-#[arcium_callback(encrypted_ix = "add_collateral")]
-pub fn add_collateral_callback(
-    ctx: Context<AddCollateralCallback>,
-    output: SignedComputationOutputs<AddCollateralOutput>,
+/// Stores the updated encrypted state after the MXE runs add_collateral_2.
+#[arcium_callback(encrypted_ix = "add_collateral_2")]
+pub fn add_collateral_2_callback(
+    ctx: Context<AddCollateral2Callback>,
+    output: SignedComputationOutputs<AddCollateral2Output>,
 ) -> Result<()> {
     let enc = match output.verify_output(
         &ctx.accounts.cluster_account,
         &ctx.accounts.computation_account,
     ) {
-        Ok(AddCollateralOutput { field_0 }) => field_0,
+        Ok(AddCollateral2Output { field_0 }) => field_0,
         Err(_) => return Err(LendingError::AbortedComputation.into()),
     };
 
@@ -280,9 +288,9 @@ pub fn add_collateral_callback(
     Ok(())
 }
 
-#[callback_accounts("add_collateral")]
+#[callback_accounts("add_collateral_2")]
 #[derive(Accounts)]
-pub struct AddCollateralCallback<'info> {
+pub struct AddCollateral2Callback<'info> {
     pub arcium_program: Program<'info, Arcium>,
 
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_ADD_COLLATERAL))]

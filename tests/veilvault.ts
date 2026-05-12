@@ -1,6 +1,11 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 import {
   createMint,
   createAccount,
@@ -16,7 +21,8 @@ describe("veilvault", () => {
   anchor.setProvider(provider);
 
   const program = anchor.workspace.Veilvault as Program<Veilvault>;
-  const owner = Keypair.generate();
+  // Use the pre-funded provider wallet as owner — no airdrop needed on devnet
+  const owner = (provider.wallet as anchor.Wallet).payer;
   const user = Keypair.generate();
 
   let lendingMarketPda: PublicKey;
@@ -34,13 +40,15 @@ describe("veilvault", () => {
   let userCollateralAccount: PublicKey;
 
   before(async () => {
-    for (const kp of [owner, user]) {
-      const sig = await provider.connection.requestAirdrop(
-        kp.publicKey,
-        10 * anchor.web3.LAMPORTS_PER_SOL
-      );
-      await provider.connection.confirmTransaction(sig);
-    }
+    // Fund user from owner (pre-funded wallet) — no airdrop needed on devnet
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: user.publicKey,
+        lamports: 2 * anchor.web3.LAMPORTS_PER_SOL,
+      })
+    );
+    await provider.sendAndConfirm(tx, [owner]);
 
     [lendingMarketPda, lendingMarketBump] = PublicKey.findProgramAddressSync(
       [Buffer.from("lending_market"), owner.publicKey.toBuffer()],
@@ -55,18 +63,21 @@ describe("veilvault", () => {
       const quoteCurrency = Buffer.alloc(32);
       quoteCurrency.write("USD");
 
-      await program.methods
-        .initializeMarket({
-          quoteCurrency: Array.from(quoteCurrency),
-          protocolFeeBps: 50,
-        })
-        .accountsStrict({
-          owner: owner.publicKey,
-          lendingMarket: lendingMarketPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([owner])
-        .rpc();
+      const existing = await provider.connection.getAccountInfo(lendingMarketPda);
+      if (!existing) {
+        await program.methods
+          .initializeMarket({
+            quoteCurrency: Array.from(quoteCurrency),
+            protocolFeeBps: 50,
+          })
+          .accountsStrict({
+            owner: owner.publicKey,
+            lendingMarket: lendingMarketPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([owner])
+          .rpc();
+      }
 
       const market = await program.account.lendingMarket.fetch(lendingMarketPda);
 
@@ -98,11 +109,14 @@ describe("veilvault", () => {
 
     it("rejects protocol fee above max (>1000 bps)", async () => {
       const other = Keypair.generate();
-      const sig = await provider.connection.requestAirdrop(
-        other.publicKey,
-        2 * anchor.web3.LAMPORTS_PER_SOL
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: other.publicKey,
+          lamports: anchor.web3.LAMPORTS_PER_SOL,
+        })
       );
-      await provider.connection.confirmTransaction(sig);
+      await provider.sendAndConfirm(tx, [owner]);
 
       const [otherMarket] = PublicKey.findProgramAddressSync(
         [Buffer.from("lending_market"), other.publicKey.toBuffer()],
@@ -207,11 +221,14 @@ describe("veilvault", () => {
 
     it("rejects non-owner adding reserve", async () => {
       const attacker = Keypair.generate();
-      const sig = await provider.connection.requestAirdrop(
-        attacker.publicKey,
-        2 * anchor.web3.LAMPORTS_PER_SOL
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: attacker.publicKey,
+          lamports: anchor.web3.LAMPORTS_PER_SOL,
+        })
       );
-      await provider.connection.confirmTransaction(sig);
+      await provider.sendAndConfirm(tx, [owner]);
 
       const fakeMint = await createMint(
         provider.connection,

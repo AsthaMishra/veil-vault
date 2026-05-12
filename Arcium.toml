@@ -9,7 +9,5 @@ localnet_timeout_secs = 60
 backends = ["Cerberus"]
 
 # Cluster offsets for non-localnet deployments
-# Get your offset from `arcium init-mxe` or `arcium deploy`
-#
-# [clusters.devnet]
-# offset = 0
+[clusters.devnet]
+offset = 456

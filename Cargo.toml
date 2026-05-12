@@ -1,8 +1,5 @@
 [workspace]
-members = [
-    "programs/*",
-    "libs/*",
-]
+members = ["programs/*", "libs/*", "encrypted-ixs"]
 # encrypted-ixs and tools/circuit-builder are native-only crates (Arcis circuit
 # source + offline compiler). They pull in quinn/ring which cannot compile for
 # the BPF target, so they are excluded from this workspace. Build them separately:
