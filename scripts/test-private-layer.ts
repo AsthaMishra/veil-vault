@@ -108,9 +108,9 @@ function lutPda(lutOffsetSlot: BN): PublicKey {
 // Get exact values by running: cargo test -- --nocapture 2>&1 | grep COMP_DEF_OFFSET
 // OR compile and print them from lib.rs constants.
 // Real values computed from arcium_anchor::comp_def_offset() — verified via cargo test
-const COMP_DEF_OFFSET_INIT_POSITION   = 40768207;
-const COMP_DEF_OFFSET_ADD_COLLATERAL  = 1274553762;
-const COMP_DEF_OFFSET_ADD_BORROW      = 4265546300;
+const COMP_DEF_OFFSET_INIT_POSITION   = 4038118041; // comp_def_offset("init_position_2")
+const COMP_DEF_OFFSET_ADD_COLLATERAL  = 2661166638; // comp_def_offset("add_collateral_2")
+const COMP_DEF_OFFSET_ADD_BORROW      = 20291932;   // comp_def_offset("add_borrow_2")
 
 // ─── Encryption helper ────────────────────────────────────────────────────────
 
@@ -416,9 +416,9 @@ async function main() {
 
   // Only register if not already registered
   for (const [name, method, compDef] of [
-    ["init_position",   "initPositionCompDef",  compDefInitPos],
-    ["add_collateral",  "addCollateralCompDef", compDefAddColl],
-    ["add_borrow",      "addBorrowCompDef",     compDefAddBorr],
+    ["init_position_2",   "initPositionCompDef",  compDefInitPos],
+    ["add_collateral_2",  "addCollateralCompDef", compDefAddColl],
+    ["add_borrow_2",      "addBorrowCompDef",     compDefAddBorr],
   ] as [string, string, PublicKey][]) {
     const info = await connection.getAccountInfo(compDef);
     if (!info) {

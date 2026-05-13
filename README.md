@@ -4,6 +4,18 @@ A confidential lending protocol on Solana. Users deposit collateral, borrow agai
 
 **Track:** DeFi + Privacy (Colosseum Frontier)
 
+<p align="center">
+  <img src="./assets/veilvault-logo.png" 
+       alt="VeilVault" 
+       width="180">
+  
+  <h1>VeilVault</h1>
+  <p><strong>A confidential lending protocol on Solana</strong></p>
+  <p>Users deposit collateral, borrow against it, and repay — with positions kept private via Arcium MPC. Liquidations execute correctly over encrypted data without exposing individual balances.</p>
+
+  <strong>Track:</strong> DeFi + Privacy (Colosseum Frontier)
+</p>
+
 ---
 
 ## What Makes It Different
@@ -231,3 +243,6 @@ The LiteSVM suite covers:
 ## Known Limitations
 
 - **Arcium SDK 0.9.6 BPF stack frame**: `arcium_client::idl::arcium::utils::Account::try_from` generates a stack frame of ~865 KB, far exceeding Solana's 4096-byte per-function limit. This triggers a linker warning during `anchor build` but does not prevent the build from completing. Core lending instructions are unaffected. Fix pending upstream SDK update.
+
+Note: Project was submitted to Colosseum Frontier on May 11, 2026. Actively improving Arcium integration and tests post-submission.
+

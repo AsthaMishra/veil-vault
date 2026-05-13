@@ -30,7 +30,7 @@ mod circuits {
     /// Initializes an empty PrivatePosition encrypted for the MXE.
     /// Called once when creating a PrivateObligation.
     #[instruction]
-    pub fn init_position() -> Enc<Mxe, PrivatePosition> {
+    pub fn init_position_2() -> Enc<Mxe, PrivatePosition> {
         let pos = PrivatePosition {
             collateral_tokens: 0,
             borrow_tokens: 0,
@@ -41,7 +41,7 @@ mod circuits {
     /// Increases the encrypted collateral amount by `amount` whole cTokens.
     /// Called after a deposit_collateral token transfer is confirmed on-chain.
     #[instruction]
-    pub fn add_collateral(
+    pub fn add_collateral_2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -54,7 +54,7 @@ mod circuits {
     /// Decreases the encrypted collateral amount by `amount` whole cTokens.
     /// Saturates to 0 rather than underflowing — on-chain token checks prevent invalid withdrawals.
     #[instruction]
-    pub fn remove_collateral(
+    pub fn remove_collateral_2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -73,7 +73,7 @@ mod circuits {
     /// Increases the encrypted borrow amount by `amount` whole underlying tokens.
     /// Called after a borrow token transfer is confirmed on-chain.
     #[instruction]
-    pub fn add_borrow(
+    pub fn add_borrow_2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -86,7 +86,7 @@ mod circuits {
     /// Decreases the encrypted borrow amount by `amount` whole underlying tokens.
     /// Saturates to 0 — on-chain checks ensure repay amounts are valid.
     #[instruction]
-    pub fn remove_borrow(
+    pub fn remove_borrow_2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -125,8 +125,7 @@ mod circuits {
         let pos = state.to_arcis();
 
         // Divide by 10^8 (= 10_000 × 10_000) after the two BPS multiplications to stay in u64.
-        let coll_adj =
-            pos.collateral_tokens * exchange_rate_bps * ltv_bps / 100_000_000;
+        let coll_adj = pos.collateral_tokens * exchange_rate_bps * ltv_bps / 100_000_000;
         let coll_value = coll_adj * collateral_price_cents;
         let borr_value = pos.borrow_tokens * borrow_price_cents;
 
