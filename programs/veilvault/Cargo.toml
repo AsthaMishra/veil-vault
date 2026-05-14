@@ -27,9 +27,9 @@ bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 pyth-solana-receiver-sdk = "0.3.1"
 
 # Arcium MPC integration
-arcium-anchor = "0.9.6"
-arcium-client = { default-features = false, version = "=0.9.6" }
-arcium-macros = "0.9.6"
+arcium-anchor = "0.9.7"
+arcium-client = { default-features = false, version = "=0.9.7" }
+arcium-macros = "0.9.7"
 # pin so that we do not have 1.13.*
 unicode-segmentation = { version = "=1.12.0" }
 

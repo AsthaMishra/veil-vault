@@ -1,18 +1,13 @@
-# VeilVault
+<p align="center">
+  <img src="./assets/veilvault-logo.png" alt="VeilVault" width="180">
+</p>
 
-A confidential lending protocol on Solana. Users deposit collateral, borrow against it, and repay — with positions kept private via Arcium MPC. Liquidations execute correctly over encrypted data without exposing individual balances.
-
-**Track:** DeFi + Privacy (Colosseum Frontier)
+<h1 align="center">VeilVault</h1>
 
 <p align="center">
-  <img src="./assets/veilvault-logo.png" 
-       alt="VeilVault" 
-       width="180">
-  
-  <h1>VeilVault</h1>
-  <p><strong>A confidential lending protocol on Solana</strong></p>
-  <p>Users deposit collateral, borrow against it, and repay — with positions kept private via Arcium MPC. Liquidations execute correctly over encrypted data without exposing individual balances.</p>
-
+  <strong>A confidential lending protocol on Solana</strong><br>
+  Users deposit collateral, borrow against it, and repay — with positions kept private via Arcium MPC.<br>
+  Liquidations execute correctly over encrypted data without exposing individual balances.<br><br>
   <strong>Track:</strong> DeFi + Privacy (Colosseum Frontier)
 </p>
 

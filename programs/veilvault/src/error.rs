@@ -53,4 +53,6 @@ pub enum LendingError {
     ClusterNotSet,
     #[msg("PrivateObligation must be initialised before use")]
     PrivateObligationNotInitialized,
+    #[msg("PrivateObligation is already initialised")]
+    AlreadyInitialized,
 }

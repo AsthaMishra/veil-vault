@@ -51,15 +51,23 @@ pub struct InitPositionCompDef<'info> {
 
 /// Creates a PrivateObligation PDA for the caller and queues the MXE's
 /// `init_position` computation to initialise the encrypted state.
+///
+/// Safe to re-call if a previous computation expired before the callback fired
+/// (is_initialized = false). Errors if already fully initialised.
 pub fn init_private_obligation(
     ctx: Context<InitPrivateObligation>,
     computation_offset: u64,
 ) -> Result<()> {
+    require!(
+        !ctx.accounts.private_obligation.is_initialized,
+        LendingError::AlreadyInitialized
+    );
+
     let po = &mut ctx.accounts.private_obligation;
     po.bump = ctx.bumps.private_obligation;
     po.owner = ctx.accounts.payer.key();
     po.lending_market = ctx.accounts.lending_market.key();
-    po.collateral_reserve = Pubkey::default(); // set later via set_private_reserves
+    po.collateral_reserve = Pubkey::default();
     po.borrow_reserve = Pubkey::default();
     po.is_initialized = false;
     po.is_liquidatable = false;
@@ -154,7 +162,7 @@ pub struct InitPrivateObligation<'info> {
     pub lending_market: Box<Account<'info, LendingMarket>>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + PrivateObligation::INIT_SPACE,
         seeds = [

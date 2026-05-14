@@ -3,9 +3,11 @@
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-    "test:private": "npx ts-node -P tsconfig.json scripts/test-private-layer.ts"
+    "test:private": "npx ts-node -P tsconfig.json scripts/test-private-layer.ts",
+     "test:init": "npx ts-node -P tsconfig.json scripts/init_comp_def.ts"
   },
   "dependencies": {
+    "@arcium-hq/client": "0.9.7",
     "@coral-xyz/anchor": "^0.32.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4"

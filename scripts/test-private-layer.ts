@@ -35,6 +35,7 @@ import {
 import * as nacl from "tweetnacl";
 import * as fs from "fs";
 import { Veilvault } from "../target/types/veilvault";
+import { getCompDefAccOffset, getArciumProgramId } from "@arcium-hq/client";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -43,22 +44,22 @@ const PROGRAM_ID = new PublicKey(
 );
 
 // All addresses derived from arcium-client-0.9.6/src/pda.rs
-const ARCIUM_PROGRAM_ID  = new PublicKey("Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ");
-const ARCIUM_FEE_POOL    = new PublicKey("G2sRWJvi3xoyh5k2gY49eG9L8YhAEWQPtNb1zb1GXTtC");
-const ARCIUM_CLOCK_ACCT  = new PublicKey("7EbMUTLo5DjdzbN7s8BXeZwXzEwNQb1hScfRvWg8a6ot");
-const LUT_PROGRAM_ID     = new PublicKey("AddressLookupTab1e1111111111111111111111111");
+const ARCIUM_PROGRAM_ID = new PublicKey("Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ");
+const ARCIUM_FEE_POOL = new PublicKey("G2sRWJvi3xoyh5k2gY49eG9L8YhAEWQPtNb1zb1GXTtC");
+const ARCIUM_CLOCK_ACCT = new PublicKey("7EbMUTLo5DjdzbN7s8BXeZwXzEwNQb1hScfRvWg8a6ot");
+const LUT_PROGRAM_ID = new PublicKey("AddressLookupTab1e1111111111111111111111111");
 
 // MXE: seeds=[b"MXEAccount", veilvault_program_id], program=Arcium
-const MXE_ADDRESS        = new PublicKey("GS1yZm6vjUZojNmYuiErau1EZfVAtHj3JZogDyqmYDnp");
+const MXE_ADDRESS = new PublicKey("GS1yZm6vjUZojNmYuiErau1EZfVAtHj3JZogDyqmYDnp");
 // Signer: seeds=[b"ArciumSignerAccount"], program=VeilVault (not Arcium!)
-const SIGN_PDA_ADDRESS   = new PublicKey("4MswWzz8V9fxsCnTDUEUS8NufeSmLEM3Pwg1TUrhdgVR");
+const SIGN_PDA_ADDRESS = new PublicKey("4MswWzz8V9fxsCnTDUEUS8NufeSmLEM3Pwg1TUrhdgVR");
 
 // Arcium cluster offset provided by Arcium (devnet) — stored as u32
 const CLUSTER_OFFSET = new BN(456);
 
 // Cluster/pool PDAs: seeds use cluster_offset as u32 LE (4 bytes)
-const CLUSTER_ADDRESS  = new PublicKey("DzaQCyfybroycrNqE5Gk7LhSbWD2qfCics6qptBFbr95");
-const MEMPOOL_ADDRESS  = new PublicKey("Ex7BD8o8PK1y2eXDd38Jgujj93uHygrZeWXDeGAHmHtN");
+const CLUSTER_ADDRESS = new PublicKey("DzaQCyfybroycrNqE5Gk7LhSbWD2qfCics6qptBFbr95");
+const MEMPOOL_ADDRESS = new PublicKey("Ex7BD8o8PK1y2eXDd38Jgujj93uHygrZeWXDeGAHmHtN");
 const EXECPOOL_ADDRESS = new PublicKey("4mcrgNZzJwwKrE3wXMHfepT8htSBmGqBzDYPJijWooog");
 
 // Wallet: defaults to ~/.config/solana/id.json
@@ -108,9 +109,9 @@ function lutPda(lutOffsetSlot: BN): PublicKey {
 // Get exact values by running: cargo test -- --nocapture 2>&1 | grep COMP_DEF_OFFSET
 // OR compile and print them from lib.rs constants.
 // Real values computed from arcium_anchor::comp_def_offset() — verified via cargo test
-const COMP_DEF_OFFSET_INIT_POSITION   = 4038118041; // comp_def_offset("init_position_2")
-const COMP_DEF_OFFSET_ADD_COLLATERAL  = 2661166638; // comp_def_offset("add_collateral_2")
-const COMP_DEF_OFFSET_ADD_BORROW      = 20291932;   // comp_def_offset("add_borrow_2")
+const COMP_DEF_OFFSET_INIT_POSITION = 4038118041; // comp_def_offset("init_position_2")
+const COMP_DEF_OFFSET_ADD_COLLATERAL = 2661166638; // comp_def_offset("add_collateral_2")
+const COMP_DEF_OFFSET_ADD_BORROW = 20291932;   // comp_def_offset("add_borrow_2")
 
 // ─── Encryption helper ────────────────────────────────────────────────────────
 
@@ -184,6 +185,8 @@ async function pollUntil<T>(
   }
   throw new Error(`Timeout waiting for: ${label}`);
 }
+
+
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -291,6 +294,15 @@ async function main() {
     console.log("✅  Market already exists");
   }
 
+  for (const ix of ["init_position_2", "add_collateral_2", "add_borrow_2", "check_health"]) {
+    const offset = getCompDefAccOffset(ix);
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ComputationDefinitionAccount"), program.programId.toBuffer(), offset],
+      getArciumProgramId()
+    );
+    console.log(ix, pda.toBase58());
+  }
+
   // Create or reuse a token mint
   const reserveMint = await createMint(
     connection,
@@ -302,11 +314,11 @@ async function main() {
   console.log(`Reserve mint: ${reserveMint.toBase58()}`);
 
   // Derive reserve PDAs
-  const [reservePda]              = pdaVeilvault([Buffer.from("reserve"), lendingMarketPda.toBuffer(), reserveMint.toBuffer()]);
-  const [liquidityVaultPda]       = pdaVeilvault([Buffer.from("liquidity_vault"), reservePda.toBuffer()]);
-  const [feeVaultPda]             = pdaVeilvault([Buffer.from("fee_vault"), reservePda.toBuffer()]);
-  const [collateralMintPda]       = pdaVeilvault([Buffer.from("collateral_mint"), reservePda.toBuffer()]);
-  const [collateralSupplyVaultPda]= pdaVeilvault([Buffer.from("collateral_supply"), reservePda.toBuffer()]);
+  const [reservePda] = pdaVeilvault([Buffer.from("reserve"), lendingMarketPda.toBuffer(), reserveMint.toBuffer()]);
+  const [liquidityVaultPda] = pdaVeilvault([Buffer.from("liquidity_vault"), reservePda.toBuffer()]);
+  const [feeVaultPda] = pdaVeilvault([Buffer.from("fee_vault"), reservePda.toBuffer()]);
+  const [collateralMintPda] = pdaVeilvault([Buffer.from("collateral_mint"), reservePda.toBuffer()]);
+  const [collateralSupplyVaultPda] = pdaVeilvault([Buffer.from("collateral_supply"), reservePda.toBuffer()]);
 
   // Add reserve
   const reserveInfo = await connection.getAccountInfo(reservePda);
@@ -400,9 +412,9 @@ async function main() {
   // ── Step 2: Register Arcis comp_defs (one-time admin) ────────────────────
   console.log("── Step 2: Register Arcis circuits ──\n");
 
-  const compDefInitPos  = compDefPda(COMP_DEF_OFFSET_INIT_POSITION);
-  const compDefAddColl  = compDefPda(COMP_DEF_OFFSET_ADD_COLLATERAL);
-  const compDefAddBorr  = compDefPda(COMP_DEF_OFFSET_ADD_BORROW);
+  const compDefInitPos = compDefPda(COMP_DEF_OFFSET_INIT_POSITION);
+  const compDefAddColl = compDefPda(COMP_DEF_OFFSET_ADD_COLLATERAL);
+  const compDefAddBorr = compDefPda(COMP_DEF_OFFSET_ADD_BORROW);
 
   const regAccounts = {
     payer: payer.publicKey,
@@ -416,9 +428,9 @@ async function main() {
 
   // Only register if not already registered
   for (const [name, method, compDef] of [
-    ["init_position_2",   "initPositionCompDef",  compDefInitPos],
-    ["add_collateral_2",  "addCollateralCompDef", compDefAddColl],
-    ["add_borrow_2",      "addBorrowCompDef",     compDefAddBorr],
+    ["init_position_2", "initPositionCompDef", compDefInitPos],
+    ["add_collateral_2", "addCollateralCompDef", compDefAddColl],
+    ["add_borrow_2", "addBorrowCompDef", compDefAddBorr],
   ] as [string, string, PublicKey][]) {
     const info = await connection.getAccountInfo(compDef);
     if (!info) {
@@ -453,10 +465,24 @@ async function main() {
     payer.publicKey.toBuffer(),
   ]);
 
-  const poInfo = await connection.getAccountInfo(privateObligationPda);
-  if (!poInfo) {
+  // Check if already initialized — skip polling if so
+  const existingPo = await connection.getAccountInfo(privateObligationPda);
+  let alreadyInitialized = false;
+  if (existingPo) {
+    const poState = await program.account.privateObligation.fetch(privateObligationPda);
+    alreadyInitialized = poState.isInitialized;
+  }
+
+  if (alreadyInitialized) {
+    console.log("✅  PrivateObligation already initialized — skipping\n");
+  } else {
+    // Account may not exist, or exist but stuck (previous computation expired).
+    // init_if_needed on the program side makes re-calling safe.
     const comp1Pda = computationPda(compOffset1);
-    console.log("Calling init_private_obligation...");
+    console.log(existingPo
+      ? "⚠️   PrivateObligation exists but is_initialized=false — re-queuing computation..."
+      : "Calling init_private_obligation..."
+    );
     await program.methods
       .initPrivateObligation(compOffset1)
       .accountsStrict({
@@ -478,16 +504,14 @@ async function main() {
       .signers([payer])
       .rpc();
     console.log("✅  init_private_obligation submitted — waiting for MXE callback...");
-  } else {
-    console.log("✅  PrivateObligation already exists");
-  }
 
-  // Poll until is_initialized = true (MXE runs init_position and fires callback)
-  await pollUntil("is_initialized = true", async () => {
-    const po = await program.account.privateObligation.fetch(privateObligationPda);
-    return po.isInitialized ? po : null;
-  });
-  console.log("✅  PrivateObligation initialized by MXE!\n");
+    // Poll until is_initialized = true (MXE runs init_position and fires callback)
+    await pollUntil("is_initialized = true", async () => {
+      const po = await program.account.privateObligation.fetch(privateObligationPda);
+      return po.isInitialized ? po : null;
+    });
+    console.log("✅  PrivateObligation initialized by MXE!\n");
+  }
 
   // ── Step 4: Private deposit collateral ───────────────────────────────────
   console.log("── Step 4: Private deposit collateral ──\n");
@@ -632,3 +656,6 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
+
+

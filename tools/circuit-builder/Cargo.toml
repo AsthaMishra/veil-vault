@@ -8,4 +8,4 @@ name = "circuit-builder"
 path = "src/main.rs"
 
 [dependencies]
-arcis-compiler = { version = "=0.9.6", default-features = false }
+arcis-compiler = { version = "=0.9.7", default-features = false }
