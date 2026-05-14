@@ -19,7 +19,7 @@ pub fn init_position_comp_def(ctx: Context<InitPositionCompDef>) -> Result<()> {
     init_comp_def(
         ctx.accounts,
         Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/veilvault/build/init_position_2.arcis".to_string(),
+            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/build/init_position_2.arcis".to_string(),
             hash: circuit_hash!("init_position_2"),
         })),
         None,

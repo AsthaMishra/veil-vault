@@ -19,7 +19,7 @@ pub fn add_borrow_comp_def(ctx: Context<AddBorrowCompDef>) -> Result<()> {
     init_comp_def(
         ctx.accounts,
         Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/veilvault/build/add_borrow_2.arcis".to_string(),
+            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/build/add_borrow_2.arcis".to_string(),
             hash: circuit_hash!("add_borrow_2"),
         })),
         None,

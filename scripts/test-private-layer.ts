@@ -426,22 +426,23 @@ async function main() {
     systemProgram: SystemProgram.programId,
   };
 
-  // Only register if not already registered
+  // Always re-register to pick up URL/hash changes (Arcium allows overwriting comp_defs).
+  // Revert to `if (!info)` guard once comp_defs are stable.
   for (const [name, method, compDef] of [
     ["init_position_2", "initPositionCompDef", compDefInitPos],
     ["add_collateral_2", "addCollateralCompDef", compDefAddColl],
     ["add_borrow_2", "addBorrowCompDef", compDefAddBorr],
   ] as [string, string, PublicKey][]) {
-    const info = await connection.getAccountInfo(compDef);
-    if (!info) {
-      console.log(`Registering ${name} circuit...`);
+    console.log(`Registering ${name} circuit...`);
+    try {
       await (program.methods as any)[method]()
         .accountsStrict({ ...regAccounts, compDefAccount: compDef })
         .signers([payer])
         .rpc();
       console.log(`✅  ${name} registered`);
-    } else {
-      console.log(`✅  ${name} already registered`);
+    } catch (e: any) {
+      // If Arcium does not allow overwriting, skip with a warning
+      console.warn(`⚠️   ${name} registration failed (may already be locked): ${e?.message ?? e}`);
     }
   }
   console.log();
