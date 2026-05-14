@@ -138,6 +138,82 @@ Arcium MPC encrypts per-user:
 
 Liquidation checks run over encrypted data via Arcium's MXE. The liquidator learns only whether a position is liquidatable — not the exact amounts. Six Arcis circuits handle the confidential arithmetic.
 
+### v2 Privacy Model
+
+Individual transaction amounts are visible on-chain — SPL `transfer_checked` requires a plaintext value, so the amount in each `private_borrow` or `private_deposit_collateral` call is readable in the transaction data. What is encrypted is the **cumulative position**: the `PrivateObligation.enc_state` field stores total collateral, total debt, and health factor inputs as MXE ciphertext. No external observer can query a user's current position or monitor proximity to liquidation.
+
+The ideal design would pass only the `encrypted_amount` to the circuit and prove the SPL transfer matches it using a ZK proof — never revealing the plaintext on-chain. That is the approach taken by Aztec, Penumbra, and Zcash. It is a significantly harder problem requiring ZK-proven private transfers, which is a planned v3 improvement.
+
+---
+
+## Live Demo (Devnet)
+
+End-to-end run of the private lending flow on Solana devnet. All transactions and accounts are verifiable on-chain.
+
+### Circuit Registration (Comp Defs)
+
+Before the privacy layer can operate, each Arcis circuit is registered once as a `ComputationDefinitionAccount` under the Arcium program. The MXE fetches the compiled `.arcis` binary from GitHub and verifies its hash.
+
+| Circuit | Comp Def Account |
+|---|---|
+| `init_position_v2` | [DFmTaS8...WuX](https://solscan.io/account/DFmTaS8aBtqqCduUU7LmTQDA5TcdMi4pRXDWhTWzWuX?cluster=devnet) |
+| `add_collateral_v2` | [hNA917...iJe](https://solscan.io/account/hNA917Ls4PC2Uy4tsp6FJbHYi1x6fKuwrwsU4vFHiJe?cluster=devnet) |
+| `add_borrow_v2` | [6k5Cvi...eRv](https://solscan.io/account/6k5CviEHLrtCKq98B1KGgJ3QfZQJyDZKwoBSVFzcNeRv?cluster=devnet) |
+
+<p align="center">
+  <img src="./assets/demo_init_position_v2.PNG" alt="init_position_v2 comp def account" width="700">
+  <br><em>init_position_v2 ComputationDefinitionAccount — registered under Arcium program</em>
+</p>
+
+---
+
+### PrivateObligation — Encrypted On-Chain State
+
+Each user has a `PrivateObligation` PDA whose `enc_state` field holds their entire position (collateral + borrow) as MXE-encrypted ciphertext. No external observer can read collateral or debt amounts from this account.
+
+[View PrivateObligation on Solscan →](https://solscan.io/account/9ukyXVcXkJNKPtuemk86KZQPM3DDJshD7EBi2iEeAkpa?cluster=devnet)
+
+<p align="center">
+  <img src="./assets/demo_private_obligation_v2.PNG" alt="PrivateObligation account data showing encrypted state" width="700">
+  <br><em>PrivateObligation account — enc_state bytes are MXE ciphertext, unreadable without MPC key share</em>
+</p>
+
+---
+
+### Step 1 — Private Deposit Collateral
+
+The user locks cTokens as collateral. The instruction triggers an SPL token transfer and queues an `add_collateral_v2` MPC computation. The Arcium MXE updates the encrypted collateral field in `PrivateObligation` via callback.
+
+[View transaction on Solscan →](https://solscan.io/tx/56rPC56MaQJNQYXDUiWBSQ2RSf5aJycGqVJn3McvoppRMQXwSvp56WmpUYT6zR5dtUbn19snQeoh4VACFVP6gimY?cluster=devnet)
+
+<p align="center">
+  <img src="./assets/demo_private_deposit_v2_tx.PNG" alt="private_deposit_collateral transaction" width="700">
+  <br><em>private_deposit_collateral — SPL transfer + MPC computation queued</em>
+</p>
+
+<p align="center">
+  <img src="./assets/demo_private_deposit_v2_tx_data.PNG" alt="PrivateObligation data after deposit" width="700">
+  <br><em>PrivateObligation enc_state after MXE callback — collateral field updated with new ciphertext</em>
+</p>
+
+---
+
+### Step 2 — Private Borrow
+
+The user borrows underlying tokens against their encrypted collateral. Health factor is checked inline against the public `Obligation` values. The MXE then updates the encrypted borrow field in `PrivateObligation` — the cumulative debt is never stored in plaintext.
+
+[View transaction on Solscan →](https://solscan.io/tx/5YFmzeheKRi3htVRheANKEFZ32WUgmQp4PYVDiQ2rhVHCVwouE7yh7oRPzNr97nAYQD4ER2gkDQSNangwTcSnLE?cluster=devnet)
+
+<p align="center">
+  <img src="./assets/demo_private_borrow_v2_tx.PNG" alt="private_borrow transaction" width="700">
+  <br><em>private_borrow — tokens transferred to borrower, MPC borrow update queued</em>
+</p>
+
+<p align="center">
+  <img src="./assets/demo_private_borrow_v2_tx_data.PNG" alt="PrivateObligation data after borrow" width="700">
+  <br><em>PrivateObligation enc_state after MXE callback — borrow field updated, position fully encrypted</em>
+</p>
+
 ---
 
 ## Tech Stack
@@ -191,26 +267,47 @@ libs/veilvault-tests/         — LiteSVM Rust integration test suite (36 tests)
 
 ## Building and Testing
 
-**Prerequisites:** Rust, Solana CLI, Anchor 0.32.1, Node.js 18+
+**Prerequisites:** Rust, Solana CLI, Anchor 0.32.1, Node.js 18+, [Arcium CLI](https://docs.arcium.com/getting-started/installation)
 
 ```bash
 cd veilvault
+```
 
-# build the BPF program
-anchor build
+### Standard lending layer
 
-# TypeScript smoke tests (no localnet needed — uses bankrun)
-anchor test
-
+```bash
 # Rust unit tests (66 tests, no validator needed)
 cargo test -p veilvault
 
 # LiteSVM integration tests (36 tests — full deposit/borrow/repay/liquidate flows)
-# First build the BPF:
 cargo build-sbf
-# Then run integration suite:
 cargo test -p veilvault-tests
+
+# TypeScript smoke tests (no localnet needed — uses bankrun)
+anchor test
 ```
+
+### Privacy layer (Arcium circuits)
+
+The encrypted instructions depend on Arcium circuits. Use `arcium` commands instead of plain `anchor` — they compile circuits and the Anchor program together.
+
+```bash
+# Update the Arcium toolchain (run once, or when upgrading)
+arcup update
+
+# Compile Arcis circuits + Anchor program
+arcium build
+
+# Deploy program + register with Arcium MXE (devnet)
+arcium deploy
+
+# Run the private layer end-to-end test (devnet)
+# Registers comp_defs, inits PrivateObligation, deposits collateral, borrows
+npm install
+npm run test:private
+```
+
+> **Note:** `arcium build` and `arcium deploy` must be used instead of `anchor build` / `anchor deploy` when working with the privacy layer. The Arcium CLI compiles `.arcis` circuits and wires them into the deployment.
 
 The LiteSVM suite covers:
 - Market and reserve initialization

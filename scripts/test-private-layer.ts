@@ -35,7 +35,7 @@ import {
 import * as nacl from "tweetnacl";
 import * as fs from "fs";
 import { Veilvault } from "../target/types/veilvault";
-import { getCompDefAccOffset, getArciumProgramId } from "@arcium-hq/client";
+import { getCompDefAccOffset, getArciumProgramId, RescueCipher, x25519, deserializeLE } from "@arcium-hq/client";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -70,11 +70,11 @@ const RPC_URL = "https://api.devnet.solana.com";
 
 // ─── PDA helpers ─────────────────────────────────────────────────────────────
 
-function pdaVeilvault(seeds: Buffer[]): [PublicKey, number] {
+function pdaVeilvault(seeds: (Buffer | Uint8Array)[]): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(seeds, PROGRAM_ID);
 }
 
-function pdaArcium(seeds: Buffer[]): [PublicKey, number] {
+function pdaArcium(seeds: (Buffer | Uint8Array)[]): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(seeds, ARCIUM_PROGRAM_ID);
 }
 
@@ -112,12 +112,8 @@ function lutPda(lutOffsetSlot: BN): PublicKey {
  * Encrypts a u64 amount for the Arcium MXE.
  *
  * Uses X25519 Diffie-Hellman + XSalsa20 stream cipher:
- *   shared_secret = X25519(client_sk, mxe_x25519_pk)
- *   keystream     = XSalsa20(shared_secret, nonce)
- *   ciphertext    = padded_amount XOR keystream  [32 bytes]
- *
- * NOTE: If Arcium uses a different scheme (e.g. ChaCha20-Poly1305),
- *       update this function. Check arcium-anchor release notes or Discord.
+ *   shared_secret    = X25519(client_sk, mxe_x25519_pk)
+ *   encryptedAmount  = RescueCipher(shared_secret).encrypt([amount], nonce)[0]
  *
  * @returns { encryptedAmount, encryptionPubkey, encryptionNonce }
  */
@@ -130,33 +126,24 @@ function encryptAmountForMxe(
   encryptionNonce: bigint;       // u128
 } {
   // 1. Generate ephemeral X25519 keypair
-  const clientKeyPair = nacl.box.keyPair();
+  const clientPrivKey = x25519.utils.randomPrivateKey();
+  const clientPubKey = x25519.getPublicKey(clientPrivKey);
 
   // 2. Compute X25519 shared secret
-  const sharedSecret = nacl.scalarMult(clientKeyPair.secretKey, mxeX25519Pubkey);
+  const sharedSecret = x25519.getSharedSecret(clientPrivKey, mxeX25519Pubkey);
 
-  // 3. Random 16-byte nonce (u128)
+  // 3. Random 16-byte nonce → u128
   const nonceBytes = nacl.randomBytes(16);
-  const encryptionNonce =
-    BigInt("0x" + Buffer.from(nonceBytes).toString("hex"));
+  const encryptionNonce = deserializeLE(nonceBytes);
 
-  // 4. Pad amount to 32 bytes (little-endian u64 in first 8 bytes, rest zero)
-  const plaintext = new Uint8Array(32);
-  const amountBuf = Buffer.alloc(8);
-  amountBuf.writeBigUInt64LE(amount);
-  plaintext.set(amountBuf);
-
-  // 5. XOR with keystream derived from shared secret + nonce
-  //    (simplified — replace with Arcium's exact scheme if different)
-  const keystream = nacl.secretbox(plaintext, new Uint8Array(24), sharedSecret);
-  const encryptedAmount = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    encryptedAmount[i] = plaintext[i] ^ (keystream[i] ?? 0);
-  }
+  // 4. Encrypt using Arcium's RescueCipher (CTR mode over Curve25519 scalar field)
+  const cipher = new RescueCipher(sharedSecret);
+  const ciphertext = cipher.encrypt([amount], nonceBytes);
+  const encryptedAmount = new Uint8Array(ciphertext[0]);
 
   return {
     encryptedAmount,
-    encryptionPubkey: clientKeyPair.publicKey,
+    encryptionPubkey: clientPubKey,
     encryptionNonce,
   };
 }
@@ -405,9 +392,9 @@ async function main() {
   // ── Step 2: Register Arcis comp_defs (one-time admin) ────────────────────
   console.log("── Step 2: Register Arcis circuits ──\n");
 
-  const compDefInitPos = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("init_position_v2")])[0];
-  const compDefAddColl = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("add_collateral_v2")])[0];
-  const compDefAddBorr = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("add_borrow_v2")])[0];
+  const compDefInitPos = pdaArcium([Buffer.from("ComputationDefinitionAccount"), PROGRAM_ID.toBytes(), getCompDefAccOffset("init_position_v2")])[0];
+  const compDefAddColl = pdaArcium([Buffer.from("ComputationDefinitionAccount"), PROGRAM_ID.toBytes(), getCompDefAccOffset("add_collateral_v2")])[0];
+  const compDefAddBorr = pdaArcium([Buffer.from("ComputationDefinitionAccount"), PROGRAM_ID.toBytes(), getCompDefAccOffset("add_borrow_v2")])[0];
 
   const regAccounts = {
     payer: payer.publicKey,
@@ -436,6 +423,7 @@ async function main() {
     } else {
       console.log(`✅  ${name} already registered`);
     }
+    console.log(`   Solscan: https://solscan.io/account/${compDef.toBase58()}?cluster=devnet`);
   }
   console.log();
 
@@ -457,6 +445,7 @@ async function main() {
     lendingMarketPda.toBuffer(),
     payer.publicKey.toBuffer(),
   ]);
+  console.log(`PrivateObligation: https://solscan.io/account/${privateObligationPda.toBase58()}?cluster=devnet\n`);
 
   // Check if already initialized — skip polling if so
   const existingPo = await connection.getAccountInfo(privateObligationPda);
@@ -495,7 +484,8 @@ async function main() {
         privateObligation: privateObligationPda,
       })
       .signers([payer])
-      .rpc();
+      .rpc()
+      .then((sig) => console.log(`   tx: https://solscan.io/tx/${sig}?cluster=devnet`));
     console.log("✅  init_private_obligation submitted — waiting for MXE callback...");
 
     // Poll until is_initialized = true (MXE runs init_position and fires callback)
@@ -550,7 +540,8 @@ async function main() {
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .signers([payer])
-    .rpc();
+    .rpc()
+    .then((sig) => console.log(`   tx: https://solscan.io/tx/${sig}?cluster=devnet`));
   console.log("✅  private_deposit_collateral submitted — waiting for MXE...");
 
   // Poll until enc_state changes (MXE ran add_collateral circuit)
@@ -619,7 +610,8 @@ async function main() {
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .signers([payer])
-    .rpc();
+    .rpc()
+    .then((sig) => console.log(`   tx: https://solscan.io/tx/${sig}?cluster=devnet`));
   console.log("✅  private_borrow submitted — waiting for MXE...");
 
   // Poll until enc_state changes again

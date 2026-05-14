@@ -4,13 +4,13 @@ use arcium_anchor::prelude::*;
 use arcium_client::idl::arcium::types::{CallbackAccount, CircuitSource, OffChainCircuitSource};
 use arcium_macros::circuit_hash;
 
+use crate::validate_callback_ixs;
+use crate::LendingError as ErrorCode;
 use crate::{
     error::LendingError,
     state::{LendingMarket, Obligation, PrivateObligation, Reserve},
     ArciumSignerAccount, COMP_DEF_OFFSET_ADD_BORROW, ID, ID_CONST,
 };
-use crate::validate_callback_ixs;
-use crate::LendingError as ErrorCode;
 
 // ─── Comp-def registration ────────────────────────────────────────────────────
 
@@ -85,10 +85,15 @@ pub fn private_borrow(
     let reserve_mint_decimals = ctx.accounts.reserve_mint.decimals;
     let reserve_key = ctx.accounts.reserve.key();
 
+    let oracle_is_set = ctx.accounts.reserve.load()?.config.pyth_oracle != Pubkey::default();
+
     let (cumulative_borrow_rate_sf, reserve_price_sf) = {
         let mut reserve = ctx.accounts.reserve.load_mut()?;
         require!(reserve.config.is_active(), LendingError::InvalidConfig);
-        require!(reserve.liquidity.market_price_sf > 0, LendingError::PriceNotValid);
+        require!(
+            !oracle_is_set || reserve.liquidity.market_price_sf > 0,
+            LendingError::PriceNotValid
+        );
         reserve.accrue_interest(clock.slot)?;
         reserve.borrow(amount)?;
         (
@@ -100,7 +105,7 @@ pub fn private_borrow(
     {
         let mut obligation = ctx.accounts.obligation.load_mut()?;
         require!(
-            !obligation.last_update.is_slot_stale(clock.slot),
+           !oracle_is_set ||  !obligation.last_update.is_slot_stale(clock.slot),
             LendingError::ObligationStale
         );
 
@@ -110,15 +115,13 @@ pub fn private_borrow(
         obligation.borrow(reserve_key, amount as u128, cumulative_borrow_rate_sf)?;
 
         // Inline health-factor check (public collateral vs new borrow + existing borrows).
-        let collateral_value_sf: u128 = obligation.deposits
-            [..obligation.deposits_count as usize]
+        let collateral_value_sf: u128 = obligation.deposits[..obligation.deposits_count as usize]
             .iter()
             .filter(|d| d.is_active())
             .map(|d| d.market_value_sf)
             .sum();
 
-        let existing_borrow_sf: u128 = obligation.borrows
-            [..obligation.borrows_count as usize]
+        let existing_borrow_sf: u128 = obligation.borrows[..obligation.borrows_count as usize]
             .iter()
             .filter(|b| b.is_active())
             .map(|b| b.market_value_sf)
@@ -176,8 +179,8 @@ pub fn private_borrow(
         .plaintext_u128(ctx.accounts.private_obligation.nonce)
         .account(
             ctx.accounts.private_obligation.key(),
-            8 + 1,  // discriminator (8) + bump (1) = offset of enc_state
-            64,     // [[u8; 32]; 2] = 64 bytes
+            8 + 1, // discriminator (8) + bump (1) = offset of enc_state
+            64,    // [[u8; 32]; 2] = 64 bytes
         )
         .build();
 
