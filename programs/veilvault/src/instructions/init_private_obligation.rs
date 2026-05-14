@@ -183,12 +183,21 @@ pub fn init_position_2_callback(
     ctx: Context<InitPosition2Callback>,
     output: SignedComputationOutputs<InitPosition2Output>,
 ) -> Result<()> {
+    let is_failure = matches!(output, SignedComputationOutputs::Failure(_));
+    msg!("init_position_2_callback: is_failure={}", is_failure);
+
     let enc = match output.verify_output(
         &ctx.accounts.cluster_account,
         &ctx.accounts.computation_account,
     ) {
-        Ok(InitPosition2Output { field_0 }) => field_0,
-        Err(_) => return Err(LendingError::AbortedComputation.into()),
+        Ok(InitPosition2Output { field_0 }) => {
+            msg!("verify_output: Success");
+            field_0
+        }
+        Err(e) => {
+            msg!("verify_output: Err {:?}", e);
+            return Err(LendingError::AbortedComputation.into());
+        }
     };
 
     ctx.accounts.private_obligation.enc_state = enc.ciphertexts;
