@@ -104,14 +104,7 @@ function lutPda(lutOffsetSlot: BN): PublicKey {
   )[0];
 }
 
-// Computation definition offsets — must match Rust constants (comp_def_offset fn)
-// These are CRC32 or similar hashes of the function name.
-// Get exact values by running: cargo test -- --nocapture 2>&1 | grep COMP_DEF_OFFSET
-// OR compile and print them from lib.rs constants.
-// Real values computed from arcium_anchor::comp_def_offset() — verified via cargo test
-const COMP_DEF_OFFSET_INIT_POSITION = 4038118041; // comp_def_offset("init_position_2")
-const COMP_DEF_OFFSET_ADD_COLLATERAL = 2661166638; // comp_def_offset("add_collateral_2")
-const COMP_DEF_OFFSET_ADD_BORROW = 20291932;   // comp_def_offset("add_borrow_2")
+// comp_def PDAs are derived dynamically from circuit names via getCompDefAccOffset.
 
 // ─── Encryption helper ────────────────────────────────────────────────────────
 
@@ -294,7 +287,7 @@ async function main() {
     console.log("✅  Market already exists");
   }
 
-  for (const ix of ["init_position_2", "add_collateral_2", "add_borrow_2", "check_health"]) {
+  for (const ix of ["init_position_v2", "add_collateral_v2", "add_borrow_v2", "check_health_v2"]) {
     const offset = getCompDefAccOffset(ix);
     const [pda] = PublicKey.findProgramAddressSync(
       [Buffer.from("ComputationDefinitionAccount"), program.programId.toBuffer(), offset],
@@ -412,9 +405,9 @@ async function main() {
   // ── Step 2: Register Arcis comp_defs (one-time admin) ────────────────────
   console.log("── Step 2: Register Arcis circuits ──\n");
 
-  const compDefInitPos = compDefPda(COMP_DEF_OFFSET_INIT_POSITION);
-  const compDefAddColl = compDefPda(COMP_DEF_OFFSET_ADD_COLLATERAL);
-  const compDefAddBorr = compDefPda(COMP_DEF_OFFSET_ADD_BORROW);
+  const compDefInitPos = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("init_position_v2")])[0];
+  const compDefAddColl = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("add_collateral_v2")])[0];
+  const compDefAddBorr = pdaArcium([Buffer.from("ComputationDefinitionAccount"), Buffer.from(PROGRAM_ID.toBytes()), getCompDefAccOffset("add_borrow_v2")])[0];
 
   const regAccounts = {
     payer: payer.publicKey,
@@ -426,23 +419,22 @@ async function main() {
     systemProgram: SystemProgram.programId,
   };
 
-  // Always re-register to pick up URL/hash changes (Arcium allows overwriting comp_defs).
-  // Revert to `if (!info)` guard once comp_defs are stable.
+  // Only register if not already registered
   for (const [name, method, compDef] of [
-    ["init_position_2", "initPositionCompDef", compDefInitPos],
-    ["add_collateral_2", "addCollateralCompDef", compDefAddColl],
-    ["add_borrow_2", "addBorrowCompDef", compDefAddBorr],
+    ["init_position_v2", "initPositionCompDef", compDefInitPos],
+    ["add_collateral_v2", "addCollateralCompDef", compDefAddColl],
+    ["add_borrow_v2", "addBorrowCompDef", compDefAddBorr],
   ] as [string, string, PublicKey][]) {
-    console.log(`Registering ${name} circuit...`);
-    try {
+    const info = await connection.getAccountInfo(compDef);
+    if (!info) {
+      console.log(`Registering ${name} circuit...`);
       await (program.methods as any)[method]()
         .accountsStrict({ ...regAccounts, compDefAccount: compDef })
         .signers([payer])
         .rpc();
       console.log(`✅  ${name} registered`);
-    } catch (e: any) {
-      // If Arcium does not allow overwriting, skip with a warning
-      console.warn(`⚠️   ${name} registration failed (may already be locked): ${e?.message ?? e}`);
+    } else {
+      console.log(`✅  ${name} already registered`);
     }
   }
   console.log();

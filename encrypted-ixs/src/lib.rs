@@ -30,7 +30,7 @@ mod circuits {
     /// Initializes an empty PrivatePosition encrypted for the MXE.
     /// Called once when creating a PrivateObligation.
     #[instruction]
-    pub fn init_position_2() -> Enc<Mxe, PrivatePosition> {
+    pub fn init_position_v2() -> Enc<Mxe, PrivatePosition> {
         let pos = PrivatePosition {
             collateral_tokens: 0,
             borrow_tokens: 0,
@@ -41,7 +41,7 @@ mod circuits {
     /// Increases the encrypted collateral amount by `amount` whole cTokens.
     /// Called after a deposit_collateral token transfer is confirmed on-chain.
     #[instruction]
-    pub fn add_collateral_2(
+    pub fn add_collateral_v2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -73,7 +73,7 @@ mod circuits {
     /// Increases the encrypted borrow amount by `amount` whole underlying tokens.
     /// Called after a borrow token transfer is confirmed on-chain.
     #[instruction]
-    pub fn add_borrow_2(
+    pub fn add_borrow_v2(
         amount: Enc<Shared, u64>,
         state: Enc<Mxe, PrivatePosition>,
     ) -> Enc<Mxe, PrivatePosition> {
@@ -115,7 +115,7 @@ mod circuits {
     ///   borr_value = borrow_tokens × borrow_price_cents
     ///   is_healthy = coll_value >= borr_value
     #[instruction]
-    pub fn check_health(
+    pub fn check_health_v2(
         state: Enc<Mxe, PrivatePosition>,
         exchange_rate_bps: u64,
         collateral_price_cents: u64,

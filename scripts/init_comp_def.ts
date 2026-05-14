@@ -96,15 +96,15 @@
 
 // const pascal = (s: string) => s.replace(/(^|_)(\w)/g, (_, __, c) => c.toUpperCase());
 
-// // initCompDef("init_position_2").catch(console.error);
-// // initCompDef("add_collateral_2").catch(console.error);
+// // initCompDef("init_position_v2").catch(console.error);
+// // initCompDef("add_collateral_v2").catch(console.error);
 // // initCompDef("remove_collateral_2").catch(console.error);
-// // initCompDef("add_borrow_2").catch(console.error);
-// // initCompDef("check_health").catch(console.error);
+// // initCompDef("add_borrow_v2").catch(console.error);
+// // initCompDef("check_health_v2").catch(console.error);
 
 
 // async function initInitPosition2CompDef(program: anchor.Program<Veilvault>, owner: anchor.web3.Keypair) {
-//   const offset = getCompDefAccOffset("init_position_2");
+//   const offset = getCompDefAccOffset("init_position_v2");
 //   const sig = await program.methods
 //     .initInitPosition2CompDef()
 //     .accounts({ payer: owner.publicKey, /* mxe_account, comp_def_account, etc. */ })
@@ -114,7 +114,7 @@
 // }
 
 // async function initAddCollateral2CompDef(program: anchor.Program<Veilvault>, owner: anchor.web3.Keypair) {
-//   const offset = getCompDefAccOffset("add_collateral_2");
+//   const offset = getCompDefAccOffset("add_collateral_v2");
 //   const sig = await program.methods
 //     .initAddCollateral2CompDef()
 //     .accounts({ payer: owner.publicKey, /* mxe_account, comp_def_account, etc. */ })
@@ -134,7 +134,7 @@
 // }
 
 // async function initAddBorrow2CompDef(program: anchor.Program<Veilvault>, owner: anchor.web3.Keypair) {
-//   const offset = getCompDefAccOffset("add_borrow_2");
+//   const offset = getCompDefAccOffset("add_borrow_v2");
 //   const sig = await program.methods
 //     .initAddBorrow2CompDef()
 //     .accounts({ payer: owner.publicKey, /* mxe_account, comp_def_account, etc. */ })
@@ -144,7 +144,7 @@
 // }
 
 // async function initCheckHealthCompDef(program: anchor.Program<Veilvault>, owner: anchor.web3.Keypair) {
-//   const offset = getCompDefAccOffset("check_health");
+//   const offset = getCompDefAccOffset("check_health_v2");
 //   const sig = await program.methods
 //     .initCheckHealthCompDef()
 //     .accounts({ payer: owner.publicKey, /* mxe_account, comp_def_account, etc. */ })

@@ -20,7 +20,7 @@ pub fn check_health_comp_def(ctx: Context<CheckHealthCompDef>) -> Result<()> {
     Ok(())
 }
 
-#[init_computation_definition_accounts("check_health", payer)]
+#[init_computation_definition_accounts("check_health_v2", payer)]
 #[derive(Accounts)]
 pub struct CheckHealthCompDef<'info> {
     #[account(mut)]
@@ -85,7 +85,7 @@ pub fn private_check_liquidatable(
         ctx.accounts,
         computation_offset,
         args,
-        vec![CheckHealthCallback::callback_ix(
+        vec![CheckHealthV2Callback::callback_ix(
             computation_offset,
             &ctx.accounts.mxe_account,
             &[CallbackAccount {
@@ -100,7 +100,7 @@ pub fn private_check_liquidatable(
     Ok(())
 }
 
-#[queue_computation_accounts("check_health", liquidator)]
+#[queue_computation_accounts("check_health_v2", liquidator)]
 #[derive(Accounts)]
 #[instruction(computation_offset: u64)]
 pub struct PrivateCheckLiquidatable<'info> {
@@ -185,16 +185,16 @@ pub struct PrivateCheckLiquidatable<'info> {
 /// Receives the bool result from the MXE.
 /// Sets `is_liquidatable = true` and emits LiquidatableEvent if HF < 1,
 /// or clears the flag if the position has recovered.
-#[arcium_callback(encrypted_ix = "check_health")]
-pub fn check_health_callback(
-    ctx: Context<CheckHealthCallback>,
-    output: SignedComputationOutputs<CheckHealthOutput>,
+#[arcium_callback(encrypted_ix = "check_health_v2")]
+pub fn check_health_v2_callback(
+    ctx: Context<CheckHealthV2Callback>,
+    output: SignedComputationOutputs<CheckHealthV2Output>,
 ) -> Result<()> {
     let is_healthy = match output.verify_output(
         &ctx.accounts.cluster_account,
         &ctx.accounts.computation_account,
     ) {
-        Ok(CheckHealthOutput { field_0 }) => field_0,
+        Ok(CheckHealthV2Output { field_0 }) => field_0,
         Err(_) => return Err(LendingError::AbortedComputation.into()),
     };
 
@@ -211,9 +211,9 @@ pub fn check_health_callback(
     Ok(())
 }
 
-#[callback_accounts("check_health")]
+#[callback_accounts("check_health_v2")]
 #[derive(Accounts)]
-pub struct CheckHealthCallback<'info> {
+pub struct CheckHealthV2Callback<'info> {
     pub arcium_program: Program<'info, Arcium>,
 
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CHECK_HEALTH))]

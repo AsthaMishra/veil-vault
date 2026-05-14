@@ -1,1 +1,0 @@
-export type InitPosition2 = {"name":"init_position_2","inputs":[],"outputs":[{"content":[{"content":[{"size_in_bits":128,"type":"u128"}],"type":"struct"},{"content":[{"content":[{"size_in_bits":255,"type":"ciphertext"},{"size_in_bits":255,"type":"ciphertext"}],"type":"array"},{"content":[],"type":"array"}],"type":"struct"}],"type":"struct"}]}

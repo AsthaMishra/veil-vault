@@ -13,21 +13,21 @@ use crate::LendingError as ErrorCode;
 
 // ─── Comp-def registration ────────────────────────────────────────────────────
 
-/// One-time admin call: registers the `init_position_2` Arcis circuit as OffChain source.
+/// One-time admin call: registers the `init_position_v2` Arcis circuit as OffChain source.
 /// Must be called once per cluster before any PrivateObligation can be created.
 pub fn init_position_comp_def(ctx: Context<InitPositionCompDef>) -> Result<()> {
     init_comp_def(
         ctx.accounts,
         Some(CircuitSource::OffChain(OffChainCircuitSource {
-            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/build/init_position_2.arcis".to_string(),
-            hash: circuit_hash!("init_position_2"),
+            source: "https://raw.githubusercontent.com/AsthaMishra/veil-vault/main/build/init_position_v2.arcis".to_string(),
+            hash: circuit_hash!("init_position_v2"),
         })),
         None,
     )?;
     Ok(())
 }
 
-#[init_computation_definition_accounts("init_position_2", payer)]
+#[init_computation_definition_accounts("init_position_v2", payer)]
 #[derive(Accounts)]
 pub struct InitPositionCompDef<'info> {
     #[account(mut)]
@@ -80,7 +80,7 @@ pub fn init_private_obligation(
         ctx.accounts,
         computation_offset,
         args,
-        vec![InitPosition2Callback::callback_ix(
+        vec![InitPositionV2Callback::callback_ix(
             computation_offset,
             &ctx.accounts.mxe_account,
             &[CallbackAccount {
@@ -95,7 +95,7 @@ pub fn init_private_obligation(
     Ok(())
 }
 
-#[queue_computation_accounts("init_position_2", payer)]
+#[queue_computation_accounts("init_position_v2", payer)]
 #[derive(Accounts)]
 #[instruction(computation_offset: u64)]
 pub struct InitPrivateObligation<'info> {
@@ -178,19 +178,19 @@ pub struct InitPrivateObligation<'info> {
 // ─── Callback ─────────────────────────────────────────────────────────────────
 
 /// Receives the MXE-encrypted initial state and stores it in PrivateObligation.
-#[arcium_callback(encrypted_ix = "init_position_2")]
-pub fn init_position_2_callback(
-    ctx: Context<InitPosition2Callback>,
-    output: SignedComputationOutputs<InitPosition2Output>,
+#[arcium_callback(encrypted_ix = "init_position_v2")]
+pub fn init_position_v2_callback(
+    ctx: Context<InitPositionV2Callback>,
+    output: SignedComputationOutputs<InitPositionV2Output>,
 ) -> Result<()> {
     let is_failure = matches!(output, SignedComputationOutputs::Failure(_));
-    msg!("init_position_2_callback: is_failure={}", is_failure);
+    msg!("init_position_v2_callback: is_failure={}", is_failure);
 
     let enc = match output.verify_output(
         &ctx.accounts.cluster_account,
         &ctx.accounts.computation_account,
     ) {
-        Ok(InitPosition2Output { field_0 }) => {
+        Ok(InitPositionV2Output { field_0 }) => {
             msg!("verify_output: Success");
             field_0
         }
@@ -207,9 +207,9 @@ pub fn init_position_2_callback(
     Ok(())
 }
 
-#[callback_accounts("init_position_2")]
+#[callback_accounts("init_position_v2")]
 #[derive(Accounts)]
-pub struct InitPosition2Callback<'info> {
+pub struct InitPositionV2Callback<'info> {
     pub arcium_program: Program<'info, Arcium>,
 
     #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_POSITION))]
